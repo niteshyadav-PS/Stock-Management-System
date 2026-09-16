@@ -1,0 +1,27 @@
+# Never commit these from either folder
+node_modules/
+
+# Environment variables — these hold live credentials
+.env
+.env.local
+.env.*.local
+
+# Build output and caches
+dist/
+dist-ssr/
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Local backup of the previous git history
+.git-backup-old/
