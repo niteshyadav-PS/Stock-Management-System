@@ -14,5 +14,7 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      # Set to the deployed frontend URL in the Render dashboard.
+      # Accepts a comma-separated list for multiple origins.
       - key: CORS_ORIGIN
-        value: https://store-management-sys.netlify.app
+        sync: false
