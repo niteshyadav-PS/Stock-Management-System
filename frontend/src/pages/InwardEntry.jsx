@@ -102,7 +102,7 @@ function matchesSearchText(entry, query) {
   const text = (query || "").trim().toLowerCase();
   if (!text) return true;
 
-  // NOTE: price is deliberately excluded — it's role-restricted.
+ 
   const haystack = [
     entry?.date,
     entry?.invdate,
