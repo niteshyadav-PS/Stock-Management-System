@@ -45,7 +45,7 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        {/* Logo */}
+     
         <div
           style={{
             display: "flex",
