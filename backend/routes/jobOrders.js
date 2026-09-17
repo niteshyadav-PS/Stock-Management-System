@@ -358,11 +358,6 @@ router.patch(
   async (req, res) => {
     try {
       const { items, receivedBy, challanNo, note } = req.body;
-      console.log(
-        "[job-orders PATCH /:id/receive] incoming",
-        req.params.id,
-        JSON.stringify(req.body),
-      );
 
       const order = await JobOrder.findById(req.params.id);
       if (!order)

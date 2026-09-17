@@ -18,15 +18,10 @@ function authMiddleware(req, res, next) {
 
 function requireRole(...roles) {
   return (req, res, next) => {
-    // TEMP DEBUG — remove once the receive-button issue is confirmed fixed.
-    // This tells us exactly what role is on the token vs what's allowed,
-    // without changing any actual authorization behavior.
     if (!req.user || !roles.includes(req.user.role)) {
       console.warn(
-        `[requireRole] DENIED — ${req.method} ${req.originalUrl} — ` +
-        `user role: ${JSON.stringify(req.user && req.user.role)} — ` +
-        `allowed: ${JSON.stringify(roles)} — ` +
-        `user payload: ${JSON.stringify(req.user)}`
+        `[requireRole] denied — ${req.method} ${req.originalUrl} — ` +
+        `role: ${JSON.stringify(req.user && req.user.role)} — allowed: ${JSON.stringify(roles)}`
       );
       return res.status(403).json({ error: 'Forbidden: insufficient role' });
     }

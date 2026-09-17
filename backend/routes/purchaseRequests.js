@@ -52,7 +52,6 @@ const VIEWER_ROLES = ['admin', 'purchase', 'store_manager', 'store', 'viewer'];
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const canViewAll = VIEWER_ROLES.includes(req.user.role);
-    console.log(`[GET LIST] role=${JSON.stringify(req.user.role)} canViewAll=${canViewAll}`);
     const filter = canViewAll ? {} : { requestedByUsername: req.user.username };
     const pagination = parsePagination(req.query);
     const result = await paginateQuery(PurchaseRequest, filter, {
