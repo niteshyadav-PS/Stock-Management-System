@@ -21,6 +21,36 @@ import {
 } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
+import { ThFilter } from "../components/ColFilter";
+
+const EMPTY_CF = {
+  date: [],
+  project: [],
+  custpo: [],
+  slip: [],
+  dept: [],
+  recby: [],
+  by: [],
+  name: [],
+  type: [],
+  code: [],
+  category: [],
+  reqty: [],
+  qty: [],
+  uom: [],
+  remqty: [],
+  remarks: [],
+};
+
+function sortNewestFirst(a, b) {
+  const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+  const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+  if (cb !== ca) return cb - ca;
+  const da = a.date ? new Date(a.date).getTime() : 0;
+  const db = b.date ? new Date(b.date).getTime() : 0;
+  if (db !== da) return db - da;
+  return String(b._id || "").localeCompare(String(a._id || ""));
+}
 
 function normalizeOutwardEntry(entry) {
   const reqty =
@@ -543,6 +573,7 @@ export default function OutwardEntry() {
   const [searchText, setSearchText] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [cf, setCf] = useState(EMPTY_CF);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
@@ -556,12 +587,40 @@ export default function OutwardEntry() {
     load();
   }, [load]);
 
-  const filteredEntries = entries.filter((entry) => {
+  const searched = entries.filter((entry) => {
     return (
       isDateInRange(entry.date, fromDate, toDate) &&
       matchesSearchText(entry, searchText)
     );
   });
+  const filteredEntries = searched
+    .filter((e) => {
+      const hasReqty =
+        e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
+      const rem = hasReqty ? Number(e.reqty) - Number(e.qty) : null;
+      return (
+        (!cf.date.length || cf.date.includes(formatDateDMY(e.date))) &&
+        (!cf.project.length || cf.project.includes(e.project || "—")) &&
+        (!cf.custpo.length || cf.custpo.includes(e.custpo || "—")) &&
+        (!cf.slip.length || cf.slip.includes(e.slip || "—")) &&
+        (!cf.dept.length || cf.dept.includes(e.dept || "—")) &&
+        (!cf.recby.length || cf.recby.includes(e.recby || "—")) &&
+        (!cf.by.length || cf.by.includes(e.by || "—")) &&
+        (!cf.name.length || cf.name.includes(e.name)) &&
+        (!cf.type.length || cf.type.includes(e.type)) &&
+        (!cf.code.length || cf.code.includes(e.code)) &&
+        (!cf.category.length || cf.category.includes(e.category)) &&
+        (!cf.reqty.length ||
+          cf.reqty.includes(hasReqty ? String(formatNum(e.reqty)) : "—")) &&
+        (!cf.qty.length || cf.qty.includes(String(formatNum(e.qty)))) &&
+        (!cf.uom.length || cf.uom.includes(e.uom)) &&
+        (!cf.remqty.length ||
+          cf.remqty.includes(hasReqty ? String(formatNum(rem)) : "—")) &&
+        (!cf.remarks.length || cf.remarks.includes(e.remarks || "—"))
+      );
+    })
+    .slice()
+    .sort(sortNewestFirst);
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredEntries, 25);
 
@@ -573,7 +632,7 @@ export default function OutwardEntry() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [fromDate, toDate, searchText]);
+  }, [fromDate, toDate, searchText, cf]);
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
@@ -1453,6 +1512,7 @@ export default function OutwardEntry() {
               setSearchText("");
               setFromDate("");
               setToDate("");
+              setCf(EMPTY_CF);
               setSelectedIds(new Set());
             }}
           >
@@ -1529,22 +1589,117 @@ export default function OutwardEntry() {
                     />
                   </th>
                 )}
-                <th>Date</th>
-                <th>Project</th>
-                <th>Cust. PO</th>
-                <th>Slip no</th>
-                <th>Dept.</th>
-                <th>Rec. By</th>
-                <th>Issued by</th>
-                <th>Material</th>
-                <th>Type</th>
-                <th>Code</th>
-                <th>Category</th>
-                <th className="num">Req. Qty</th>
-                <th className="num">Qty</th>
-                <th>UOM</th>
-                <th className="num">Rem. Qty</th>
-                <th>Remarks</th>
+                <ThFilter
+                  label="Date"
+                  values={searched.map((e) => formatDateDMY(e.date))}
+                  selected={cf.date}
+                  onChange={(v) => setCf((f) => ({ ...f, date: v }))}
+                />
+                <ThFilter
+                  label="Project"
+                  values={searched.map((e) => e.project || "—")}
+                  selected={cf.project}
+                  onChange={(v) => setCf((f) => ({ ...f, project: v }))}
+                />
+                <ThFilter
+                  label="Cust. PO"
+                  values={searched.map((e) => e.custpo || "—")}
+                  selected={cf.custpo}
+                  onChange={(v) => setCf((f) => ({ ...f, custpo: v }))}
+                />
+                <ThFilter
+                  label="Slip no"
+                  values={searched.map((e) => e.slip || "—")}
+                  selected={cf.slip}
+                  onChange={(v) => setCf((f) => ({ ...f, slip: v }))}
+                />
+                <ThFilter
+                  label="Dept."
+                  values={searched.map((e) => e.dept || "—")}
+                  selected={cf.dept}
+                  onChange={(v) => setCf((f) => ({ ...f, dept: v }))}
+                />
+                <ThFilter
+                  label="Rec. By"
+                  values={searched.map((e) => e.recby || "—")}
+                  selected={cf.recby}
+                  onChange={(v) => setCf((f) => ({ ...f, recby: v }))}
+                />
+                <ThFilter
+                  label="Issued by"
+                  values={searched.map((e) => e.by || "—")}
+                  selected={cf.by}
+                  onChange={(v) => setCf((f) => ({ ...f, by: v }))}
+                />
+                <ThFilter
+                  label="Material"
+                  values={searched.map((e) => e.name)}
+                  selected={cf.name}
+                  onChange={(v) => setCf((f) => ({ ...f, name: v }))}
+                />
+                <ThFilter
+                  label="Type"
+                  values={searched.map((e) => e.type)}
+                  selected={cf.type}
+                  onChange={(v) => setCf((f) => ({ ...f, type: v }))}
+                />
+                <ThFilter
+                  label="Code"
+                  values={searched.map((e) => e.code)}
+                  selected={cf.code}
+                  onChange={(v) => setCf((f) => ({ ...f, code: v }))}
+                />
+                <ThFilter
+                  label="Category"
+                  values={searched.map((e) => e.category)}
+                  selected={cf.category}
+                  onChange={(v) => setCf((f) => ({ ...f, category: v }))}
+                />
+                <ThFilter
+                  className="num"
+                  label="Req. Qty"
+                  values={searched.map((e) =>
+                    e.reqty !== undefined && e.reqty !== null && e.reqty !== ""
+                      ? String(formatNum(e.reqty))
+                      : "—",
+                  )}
+                  selected={cf.reqty}
+                  onChange={(v) => setCf((f) => ({ ...f, reqty: v }))}
+                />
+                <ThFilter
+                  className="num"
+                  label="Qty"
+                  values={searched.map((e) => String(formatNum(e.qty)))}
+                  selected={cf.qty}
+                  onChange={(v) => setCf((f) => ({ ...f, qty: v }))}
+                />
+                <ThFilter
+                  label="UOM"
+                  values={searched.map((e) => e.uom)}
+                  selected={cf.uom}
+                  onChange={(v) => setCf((f) => ({ ...f, uom: v }))}
+                />
+                <ThFilter
+                  className="num"
+                  label="Rem. Qty"
+                  values={searched.map((e) => {
+                    const hasReqty =
+                      e.reqty !== undefined &&
+                      e.reqty !== null &&
+                      e.reqty !== "";
+                    return hasReqty
+                      ? String(formatNum(Number(e.reqty) - Number(e.qty)))
+                      : "—";
+                  })}
+                  selected={cf.remqty}
+                  onChange={(v) => setCf((f) => ({ ...f, remqty: v }))}
+                />
+                <ThFilter
+                  label="Remarks"
+                  values={searched.map((e) => e.remarks || "—")}
+                  selected={cf.remarks}
+                  onChange={(v) => setCf((f) => ({ ...f, remarks: v }))}
+                />
                 {canEditDelete && <th style={{ minWidth: 110 }}>Actions</th>}
               </tr>
             </thead>

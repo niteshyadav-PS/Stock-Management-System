@@ -23,6 +23,36 @@ import {
 } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
+import { ThFilter } from "../components/ColFilter";
+
+const EMPTY_CF = {
+  date: [],
+  invdate: [],
+  challan: [],
+  po: [],
+  vendor: [],
+  name: [],
+  type: [],
+  code: [],
+  category: [],
+  uom: [],
+  qty: [],
+  gin: [],
+  by: [],
+  location: [],
+  remarks: [],
+  price: [],
+};
+
+function sortNewestFirst(a, b) {
+  const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+  const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+  if (cb !== ca) return cb - ca;
+  const da = a.date ? new Date(a.date).getTime() : 0;
+  const db = b.date ? new Date(b.date).getTime() : 0;
+  if (db !== da) return db - da;
+  return String(b._id || "").localeCompare(String(a._id || ""));
+}
 
 const EMPTY = {
   date: todayStr(),
@@ -577,6 +607,7 @@ export default function InwardEntry() {
   const [searchText, setSearchText] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [cf, setCf] = useState(EMPTY_CF);
 
   // ── Staged upload (waits for confirmation) ────────────────────────────
   const [pending, setPending] = useState(null);
@@ -625,12 +656,36 @@ export default function InwardEntry() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, poList, navigate, location.pathname]);
 
-  const filteredEntries = entries.filter((entry) => {
+  const searched = entries.filter((entry) => {
     return (
       isDateInRange(entry.date, fromDate, toDate) &&
       matchesSearchText(entry, searchText)
     );
   });
+  const filteredEntries = searched
+    .filter(
+      (e) =>
+        (!cf.date.length || cf.date.includes(formatDateDMY(e.date))) &&
+        (!cf.invdate.length ||
+          cf.invdate.includes(e.invdate ? formatDateDMY(e.invdate) : "—")) &&
+        (!cf.challan.length || cf.challan.includes(e.challan || "—")) &&
+        (!cf.po.length || cf.po.includes(e.po || "—")) &&
+        (!cf.vendor.length || cf.vendor.includes(e.vendor || "—")) &&
+        (!cf.name.length || cf.name.includes(e.name)) &&
+        (!cf.type.length || cf.type.includes(e.type)) &&
+        (!cf.code.length || cf.code.includes(e.code)) &&
+        (!cf.category.length || cf.category.includes(e.category)) &&
+        (!cf.uom.length || cf.uom.includes(e.uom)) &&
+        (!cf.qty.length || cf.qty.includes(String(formatNum(e.qty)))) &&
+        (!cf.gin.length || cf.gin.includes(e.gin || "—")) &&
+        (!cf.by.length || cf.by.includes(e.by || "—")) &&
+        (!cf.location.length || cf.location.includes(e.location || "—")) &&
+        (!cf.remarks.length || cf.remarks.includes(e.remarks || "—")) &&
+        (!cf.price.length ||
+          cf.price.includes(String(formatNum(e.price)))),
+    )
+    .slice()
+    .sort(sortNewestFirst);
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredEntries, 25);
 
@@ -2378,6 +2433,7 @@ export default function InwardEntry() {
               setSearchText("");
               setFromDate("");
               setToDate("");
+              setCf(EMPTY_CF);
             }}
           >
             Clear
@@ -2406,22 +2462,108 @@ export default function InwardEntry() {
               }}
             >
               <tr>
-                <th>Date</th>
-                <th>Inv date</th>
-                <th>Challan / Inv no</th>
-                <th>PO no</th>
-                <th>Vendor</th>
-                <th>Material</th>
-                <th>Type</th>
-                <th>Code</th>
-                <th>Category</th>
-                <th>UOM</th>
-                <th className="num">Qty</th>
-                <th>GIN</th>
-                <th>Rec. By</th>
-                <th>Location</th>
-                <th>Remarks</th>
-                {canSeePrice && <th className="num">Price</th>}
+                <ThFilter
+                  label="Date"
+                  values={searched.map((e) => formatDateDMY(e.date))}
+                  selected={cf.date}
+                  onChange={(v) => setCf((f) => ({ ...f, date: v }))}
+                />
+                <ThFilter
+                  label="Inv date"
+                  values={searched.map((e) =>
+                    e.invdate ? formatDateDMY(e.invdate) : "—",
+                  )}
+                  selected={cf.invdate}
+                  onChange={(v) => setCf((f) => ({ ...f, invdate: v }))}
+                />
+                <ThFilter
+                  label="Challan / Inv no"
+                  values={searched.map((e) => e.challan || "—")}
+                  selected={cf.challan}
+                  onChange={(v) => setCf((f) => ({ ...f, challan: v }))}
+                />
+                <ThFilter
+                  label="PO no"
+                  values={searched.map((e) => e.po || "—")}
+                  selected={cf.po}
+                  onChange={(v) => setCf((f) => ({ ...f, po: v }))}
+                />
+                <ThFilter
+                  label="Vendor"
+                  values={searched.map((e) => e.vendor || "—")}
+                  selected={cf.vendor}
+                  onChange={(v) => setCf((f) => ({ ...f, vendor: v }))}
+                />
+                <ThFilter
+                  label="Material"
+                  values={searched.map((e) => e.name)}
+                  selected={cf.name}
+                  onChange={(v) => setCf((f) => ({ ...f, name: v }))}
+                />
+                <ThFilter
+                  label="Type"
+                  values={searched.map((e) => e.type)}
+                  selected={cf.type}
+                  onChange={(v) => setCf((f) => ({ ...f, type: v }))}
+                />
+                <ThFilter
+                  label="Code"
+                  values={searched.map((e) => e.code)}
+                  selected={cf.code}
+                  onChange={(v) => setCf((f) => ({ ...f, code: v }))}
+                />
+                <ThFilter
+                  label="Category"
+                  values={searched.map((e) => e.category)}
+                  selected={cf.category}
+                  onChange={(v) => setCf((f) => ({ ...f, category: v }))}
+                />
+                <ThFilter
+                  label="UOM"
+                  values={searched.map((e) => e.uom)}
+                  selected={cf.uom}
+                  onChange={(v) => setCf((f) => ({ ...f, uom: v }))}
+                />
+                <ThFilter
+                  className="num"
+                  label="Qty"
+                  values={searched.map((e) => String(formatNum(e.qty)))}
+                  selected={cf.qty}
+                  onChange={(v) => setCf((f) => ({ ...f, qty: v }))}
+                />
+                <ThFilter
+                  label="GIN"
+                  values={searched.map((e) => e.gin || "—")}
+                  selected={cf.gin}
+                  onChange={(v) => setCf((f) => ({ ...f, gin: v }))}
+                />
+                <ThFilter
+                  label="Rec. By"
+                  values={searched.map((e) => e.by || "—")}
+                  selected={cf.by}
+                  onChange={(v) => setCf((f) => ({ ...f, by: v }))}
+                />
+                <ThFilter
+                  label="Location"
+                  values={searched.map((e) => e.location || "—")}
+                  selected={cf.location}
+                  onChange={(v) => setCf((f) => ({ ...f, location: v }))}
+                />
+                <ThFilter
+                  label="Remarks"
+                  values={searched.map((e) => e.remarks || "—")}
+                  selected={cf.remarks}
+                  onChange={(v) => setCf((f) => ({ ...f, remarks: v }))}
+                />
+                {canSeePrice && (
+                  <ThFilter
+                    className="num"
+                    label="Price"
+                    values={searched.map((e) => String(formatNum(e.price)))}
+                    selected={cf.price}
+                    onChange={(v) => setCf((f) => ({ ...f, price: v }))}
+                  />
+                )}
                 {canEditDelete && <th style={{ minWidth: 110 }}>Actions</th>}
               </tr>
             </thead>
