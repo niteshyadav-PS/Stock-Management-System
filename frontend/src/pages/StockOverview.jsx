@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { getMaster, getInward, getOutward, unwrapList } from "../api/api";
@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import ColFilter from "../components/ColFilter";
+import { buildQtyMaps } from "../utils/stockMaps";
 import {
   BarChart,
   Bar,
@@ -161,38 +162,50 @@ export default function StockOverview() {
     load();
   }, [load]);
 
-  const inTotals = {},
-    outTotals = {},
-    inValTotals = {};
-  inward.forEach((e) => {
-    inTotals[e.name] = (inTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-    inValTotals[e.name] =
-      (inValTotals[e.name] || 0) +
-      (parseFloat(e.qty) || 0) * (parseFloat(e.price) || 0);
-  });
-  outward.forEach((e) => {
-    outTotals[e.name] = (outTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-  });
+  const { allRows, totalIn, totalOut, totalVal, lowCount, zeroCount, lowStockItems, zeroStockItems } =
+    useMemo(() => {
+      const { inMap, outMap } = buildQtyMaps(inward, outward);
+      const inValTotals = {};
+      for (const e of inward) {
+        const k = (e.name || "").trim().toLowerCase();
+        if (!k) continue;
+        inValTotals[k] =
+          (inValTotals[k] || 0) +
+          (parseFloat(e.qty) || 0) * (parseFloat(e.price) || 0);
+      }
 
-  const allRows = master.map((m) => {
-    const inQty = inTotals[m.name] || 0;
-    const outQty = outTotals[m.name] || 0;
-    const stock = inQty - outQty;
-    const avgPrice = inQty > 0 ? (inValTotals[m.name] || 0) / inQty : 0;
-    const totalVal = avgPrice * Math.max(stock, 0);
-    const minStock = parseFloat(m.minStock) || 0;
-    return { ...m, inQty, outQty, stock, minStock, avgPrice, totalVal };
-  });
+      let tIn = 0;
+      let tOut = 0;
+      for (const v of inMap.values()) tIn += v;
+      for (const v of outMap.values()) tOut += v;
 
-  const totalIn = Object.values(inTotals).reduce((a, b) => a + b, 0);
-  const totalOut = Object.values(outTotals).reduce((a, b) => a + b, 0);
-  const totalVal = allRows.reduce((s, r) => s + r.totalVal, 0);
-  const lowStockItems = allRows.filter(
-    (r) => r.minStock > 0 && r.stock < r.minStock,
-  );
-  const zeroStockItems = allRows.filter((r) => r.stock <= 0);
-  const lowCount = lowStockItems.length;
-  const zeroCount = zeroStockItems.length;
+      const rows = master.map((m) => {
+        const k = (m.name || "").trim().toLowerCase();
+        const inQty = inMap.get(k) || 0;
+        const outQty = outMap.get(k) || 0;
+        const stock = inQty - outQty;
+        const avgPrice = inQty > 0 ? (inValTotals[k] || 0) / inQty : 0;
+        const totalVal = avgPrice * Math.max(stock, 0);
+        const minStock = parseFloat(m.minStock) || 0;
+        return { ...m, inQty, outQty, stock, minStock, avgPrice, totalVal };
+      });
+
+      const lowStockItems = rows.filter(
+        (r) => r.minStock > 0 && r.stock < r.minStock,
+      );
+      const zeroStockItems = rows.filter((r) => r.stock <= 0);
+
+      return {
+        allRows: rows,
+        totalIn: tIn,
+        totalOut: tOut,
+        totalVal: rows.reduce((s, r) => s + r.totalVal, 0),
+        lowCount: lowStockItems.length,
+        zeroCount: zeroStockItems.length,
+        lowStockItems,
+        zeroStockItems,
+      };
+    }, [master, inward, outward]);
 
   // A row qualifies for a Purchase Request when it's out of stock, or below
   // its configured minimum stock.
@@ -257,37 +270,45 @@ export default function StockOverview() {
     setActiveCard((prev) => (prev === key ? null : key));
   }
 
-  const searched = allRows.filter(
-    (r) =>
-      !search ||
-      r.name.toLowerCase().includes(search.toLowerCase()) ||
-      (r.code || "").toLowerCase().includes(search.toLowerCase()),
+  const searched = useMemo(
+    () =>
+      allRows.filter(
+        (r) =>
+          !search ||
+          r.name.toLowerCase().includes(search.toLowerCase()) ||
+          (r.code || "").toLowerCase().includes(search.toLowerCase()),
+      ),
+    [allRows, search],
   );
 
-  const rows = searched
-    .filter((r) => {
-      if (activeCard === "low") return r.minStock > 0 && r.stock < r.minStock;
-      if (activeCard === "zero") return r.stock <= 0;
-      return true;
-    })
-    .filter(
-      (r) =>
-        (!cf.name.length || cf.name.includes(r.name)) &&
-        (!cf.type.length || cf.type.includes(r.type)) &&
-        (!cf.category.length || cf.category.includes(r.category)) &&
-        (!cf.code.length || cf.code.includes(r.code)) &&
-        (!cf.inQty.length || cf.inQty.includes(String(formatNum(r.inQty)))) &&
-        (!cf.outQty.length ||
-          cf.outQty.includes(String(formatNum(r.outQty)))) &&
-        (!cf.stock.length || cf.stock.includes(String(formatNum(r.stock)))) &&
-        (!cf.minStock.length ||
-          cf.minStock.includes(String(formatNum(r.minStock)))) &&
-        (!cf.uom.length || cf.uom.includes(r.uom)) &&
-        (!cf.avgPrice.length ||
-          cf.avgPrice.includes(String(formatINR(r.avgPrice)))) &&
-        (!cf.totalVal.length ||
-          cf.totalVal.includes(String(formatINR(r.totalVal)))),
-    );
+  const rows = useMemo(
+    () =>
+      searched
+        .filter((r) => {
+          if (activeCard === "low") return r.minStock > 0 && r.stock < r.minStock;
+          if (activeCard === "zero") return r.stock <= 0;
+          return true;
+        })
+        .filter(
+          (r) =>
+            (!cf.name.length || cf.name.includes(r.name)) &&
+            (!cf.type.length || cf.type.includes(r.type)) &&
+            (!cf.category.length || cf.category.includes(r.category)) &&
+            (!cf.code.length || cf.code.includes(r.code)) &&
+            (!cf.inQty.length || cf.inQty.includes(String(formatNum(r.inQty)))) &&
+            (!cf.outQty.length ||
+              cf.outQty.includes(String(formatNum(r.outQty)))) &&
+            (!cf.stock.length || cf.stock.includes(String(formatNum(r.stock)))) &&
+            (!cf.minStock.length ||
+              cf.minStock.includes(String(formatNum(r.minStock)))) &&
+            (!cf.uom.length || cf.uom.includes(r.uom)) &&
+            (!cf.avgPrice.length ||
+              cf.avgPrice.includes(String(formatINR(r.avgPrice)))) &&
+            (!cf.totalVal.length ||
+              cf.totalVal.includes(String(formatINR(r.totalVal)))),
+        ),
+    [searched, activeCard, cf],
+  );
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(rows, 25);
@@ -338,52 +359,58 @@ export default function StockOverview() {
   }
 
   // ── Chart data ────────────────────────────────────────────────────────────
-  // Top 10 by balance
-  const topBalance = [...allRows]
-    .sort((a, b) => b.stock - a.stock)
-    .slice(0, 10)
-    .map((r) => ({
-      name: shortName(r.name),
-      stock: Math.round(r.stock),
-      inQty: Math.round(r.inQty),
-      outQty: Math.round(r.outQty),
-    }));
+  const { topBalance, topInward, topOutward, topValue, categoryData, lowStockChart } =
+    useMemo(() => {
+      const topBalance = [...allRows]
+        .sort((a, b) => b.stock - a.stock)
+        .slice(0, 10)
+        .map((r) => ({
+          name: shortName(r.name),
+          stock: Math.round(r.stock),
+          inQty: Math.round(r.inQty),
+          outQty: Math.round(r.outQty),
+        }));
 
-  // Top 10 by inward qty
-  const topInward = [...allRows]
-    .sort((a, b) => b.inQty - a.inQty)
-    .slice(0, 10)
-    .map((r) => ({ name: shortName(r.name), inQty: Math.round(r.inQty) }));
+      const topInward = [...allRows]
+        .sort((a, b) => b.inQty - a.inQty)
+        .slice(0, 10)
+        .map((r) => ({ name: shortName(r.name), inQty: Math.round(r.inQty) }));
 
-  // Top 10 by outward qty
-  const topOutward = [...allRows]
-    .sort((a, b) => b.outQty - a.outQty)
-    .slice(0, 10)
-    .map((r) => ({ name: shortName(r.name), outQty: Math.round(r.outQty) }));
+      const topOutward = [...allRows]
+        .sort((a, b) => b.outQty - a.outQty)
+        .slice(0, 10)
+        .map((r) => ({ name: shortName(r.name), outQty: Math.round(r.outQty) }));
 
-  // Top 10 by value
-  const topValue = [...allRows]
-    .sort((a, b) => b.totalVal - a.totalVal)
-    .slice(0, 10)
-    .map((r) => ({ name: shortName(r.name), value: Math.round(r.totalVal) }));
+      const topValue = [...allRows]
+        .sort((a, b) => b.totalVal - a.totalVal)
+        .slice(0, 10)
+        .map((r) => ({ name: shortName(r.name), value: Math.round(r.totalVal) }));
 
-  // Category distribution by stock qty
-  const catMap = {};
-  allRows.forEach((r) => {
-    if (!r.category) return;
-    catMap[r.category] = (catMap[r.category] || 0) + Math.max(r.stock, 0);
-  });
-  const categoryData = Object.entries(catMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([name, value]) => ({ name, value: Math.round(value) }));
+      const catMap = {};
+      allRows.forEach((r) => {
+        if (!r.category) return;
+        catMap[r.category] = (catMap[r.category] || 0) + Math.max(r.stock, 0);
+      });
+      const categoryData = Object.entries(catMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([name, value]) => ({ name, value: Math.round(value) }));
 
-  // Low stock items bar
-  const lowStockChart = lowStockItems.slice(0, 10).map((r) => ({
-    name: shortName(r.name),
-    stock: Math.round(r.stock),
-    minStock: Math.round(r.minStock),
-  }));
+      const lowStockChart = lowStockItems.slice(0, 10).map((r) => ({
+        name: shortName(r.name),
+        stock: Math.round(r.stock),
+        minStock: Math.round(r.minStock),
+      }));
+
+      return {
+        topBalance,
+        topInward,
+        topOutward,
+        topValue,
+        categoryData,
+        lowStockChart,
+      };
+    }, [allRows, lowStockItems]);
 
   const chartTabs = [
     { key: "top-balance", label: "Top Balance" },

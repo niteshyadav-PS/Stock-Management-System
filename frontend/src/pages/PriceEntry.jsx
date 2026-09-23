@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
 import { getInward, updatePrice, unwrapList } from "../api/api";
@@ -7,6 +7,7 @@ import { formatNum, exportXlsx } from "../utils/helpers";
 import { useAuth } from "../context/AuthContext";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
+import { sortNewestFirst } from "../utils/stockMaps";
 
 // Display dates as dd-mm-yyyy regardless of the underlying stored format.
 function toDDMMYYYY(dateStr) {
@@ -452,30 +453,36 @@ export default function PriceEntry() {
     return (entry?.price ?? 0) === 0;
   }
 
-  const filtered = entries
-    .filter(
-      (e) =>
-        !search ||
-        e.name.toLowerCase().includes(search.toLowerCase()) ||
-        (e.code || "").toLowerCase().includes(search.toLowerCase()),
-    )
-    .filter(
-      (e) =>
-        (!cf.date.length || cf.date.includes(e.date)) &&
-        (!cf.month.length || cf.month.includes(toMonthKey(e.date))) &&
-        (!cf.vendor.length || cf.vendor.includes(e.vendor)) &&
-        (!cf.name.length || cf.name.includes(e.name)) &&
-        (!cf.code.length || cf.code.includes(e.code)) &&
-        (!cf.category.length || cf.category.includes(e.category)) &&
-        (!cf.qty.length || cf.qty.includes(String(e.qty))) &&
-        (!cf.uom.length || cf.uom.includes(e.uom)) &&
-        (!cf.price.length || cf.price.includes(String(e.price ?? 0))),
-    )
-    .sort((a, b) => {
-      const aZero = (a.price ?? 0) === 0 ? 0 : 1;
-      const bZero = (b.price ?? 0) === 0 ? 0 : 1;
-      return aZero - bZero;
-    });
+  const filtered = useMemo(
+    () =>
+      entries
+        .filter(
+          (e) =>
+            !search ||
+            e.name.toLowerCase().includes(search.toLowerCase()) ||
+            (e.code || "").toLowerCase().includes(search.toLowerCase()),
+        )
+        .filter(
+          (e) =>
+            (!cf.date.length || cf.date.includes(e.date)) &&
+            (!cf.month.length || cf.month.includes(toMonthKey(e.date))) &&
+            (!cf.vendor.length || cf.vendor.includes(e.vendor)) &&
+            (!cf.name.length || cf.name.includes(e.name)) &&
+            (!cf.code.length || cf.code.includes(e.code)) &&
+            (!cf.category.length || cf.category.includes(e.category)) &&
+            (!cf.qty.length || cf.qty.includes(String(e.qty))) &&
+            (!cf.uom.length || cf.uom.includes(e.uom)) &&
+            (!cf.price.length || cf.price.includes(String(e.price ?? 0))),
+        )
+        .slice()
+        .sort((a, b) => {
+          const aZero = (a.price ?? 0) === 0 ? 0 : 1;
+          const bZero = (b.price ?? 0) === 0 ? 0 : 1;
+          if (aZero !== bZero) return aZero - bZero;
+          return sortNewestFirst(a, b);
+        }),
+    [entries, search, cf],
+  );
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filtered, 25);
 

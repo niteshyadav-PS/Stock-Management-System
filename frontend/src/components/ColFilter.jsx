@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 
 /** Excel-style multi-select column filter (same UX as Live Stock). */
@@ -49,15 +49,18 @@ export default function ColFilter({ values, selected, onChange }) {
     setOpen((v) => !v);
   }
 
-  const unique = [...new Set(values.filter(Boolean))];
-  const toNum = (v) => {
-    const c = String(v).replace(/[^0-9.\-]/g, "");
-    return c === "" || c === "-" ? NaN : parseFloat(c);
-  };
-  const isNum = unique.every((v) => !isNaN(toNum(v)));
-  unique.sort((a, b) =>
-    isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
-  );
+  const unique = useMemo(() => {
+    const list = [...new Set((values || []).filter(Boolean))];
+    const toNum = (v) => {
+      const c = String(v).replace(/[^0-9.\-]/g, "");
+      return c === "" || c === "-" ? NaN : parseFloat(c);
+    };
+    const isNum = list.length > 0 && list.every((v) => !isNaN(toNum(v)));
+    list.sort((a, b) =>
+      isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
+    );
+    return list;
+  }, [values]);
 
   const filtered = unique.filter((v) =>
     String(v).toLowerCase().includes(search.toLowerCase()),

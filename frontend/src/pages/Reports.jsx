@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { getMaster, getInward, getOutward, unwrapList } from "../api/api";
 import { useAuth } from "../context/AuthContext";
@@ -649,7 +649,7 @@ export default function Reports() {
   }
 
   // ── Apply column filters ───────────────────────────────────────────────────
-  const filteredRows = (rows || []).filter((r) => {
+  const filteredRows = useMemo(() => (rows || []).filter((r) => {
     if (repType === "both") {
       return (
         (!cfBoth.name.length || cfBoth.name.includes(r.name)) &&
@@ -696,7 +696,7 @@ export default function Reports() {
         (!cfTxn.remarks.length || cfTxn.remarks.includes(r.remarks || "—"))
       );
     }
-  });
+  }), [rows, repType, cfBoth, cfTxn]);
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredRows || [], 25);

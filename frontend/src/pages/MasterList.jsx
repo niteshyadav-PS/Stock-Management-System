@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   getMaster,
   addMaterial,
@@ -42,11 +42,15 @@ export default function MasterList() {
     load();
   }, [load]);
 
-  const filtered = list.filter(
-    (m) =>
-      !search ||
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      (m.code || "").toLowerCase().includes(search.toLowerCase()),
+  const filtered = useMemo(
+    () =>
+      list.filter(
+        (m) =>
+          !search ||
+          m.name.toLowerCase().includes(search.toLowerCase()) ||
+          (m.code || "").toLowerCase().includes(search.toLowerCase()),
+      ),
+    [list, search],
   );
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filtered, 25);
@@ -62,8 +66,10 @@ function dedupeCategories(items) {
   return [...map.values()].sort((a, b) => a.localeCompare(b));
 }
 
-const categoryOptions = dedupeCategories(list.map((m) => m.category));
- 
+const categoryOptions = useMemo(
+  () => dedupeCategories(list.map((m) => m.category)),
+  [list],
+);
   const numMinStock = (v) => Number(v) || 0;
 
   // The material currently being edited (if any), looked up fresh from `list`

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
@@ -20,6 +20,7 @@ import { useAuth } from "../context/AuthContext";
 import { todayStr, toDDMMYYYY } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
+import { buildStockByName } from "../utils/stockMaps";
 
 const STATUS_LABEL = {
   pending: "Pending",
@@ -146,18 +147,7 @@ export default function PurchaseOrders() {
       const masterList = unwrapList(m);
       const requestList = unwrapList(reqs);
       const posList = unwrapList(pos);
-      const inTotals = {},
-        outTotals = {};
-      unwrapList(inw).forEach((e) => {
-        inTotals[e.name] = (inTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-      });
-      unwrapList(out).forEach((e) => {
-        outTotals[e.name] = (outTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-      });
-      const map = {};
-      masterList.forEach((mat) => {
-        map[mat.name] = (inTotals[mat.name] || 0) - (outTotals[mat.name] || 0);
-      });
+      const map = buildStockByName(masterList, unwrapList(inw), unwrapList(out));
 
       // Show data immediately — never block the table on heal
       setStockMap(map);
@@ -191,9 +181,14 @@ export default function PurchaseOrders() {
     load();
   }, [load]);
 
-  const eligiblePRs = requests.filter(
-    (r) =>
-      ["approved", "partial"].includes(r.status) && prHasRemaining(r, poList),
+  const eligiblePRs = useMemo(
+    () =>
+      requests.filter(
+        (r) =>
+          ["approved", "partial"].includes(r.status) &&
+          prHasRemaining(r, poList),
+      ),
+    [requests, poList],
   );
   const {
     pageItems: prPageItems,

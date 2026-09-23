@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../context/AuthContext";
 import { todayStr } from "../utils/helpers";
@@ -3612,51 +3612,55 @@ export default function JobOrder() {
     partial: { bg: "#fef3c7", color: "#92400e" },
   };
 
-  const visible = orders.filter((o) => {
-    const dispatchedQty = orderDispatchedQty(o);
-    const receivedQty = orderReceivedQty(o);
+  const visible = useMemo(
+    () =>
+      orders.filter((o) => {
+        const dispatchedQty = orderDispatchedQty(o);
+        const receivedQty = orderReceivedQty(o);
 
-    if (colFilters.challanNo.length && !colFilters.challanNo.includes(o.srNo))
-      return false;
-    if (
-      colFilters.date.length &&
-      !colFilters.date.includes(formatDate(o.date))
-    )
-      return false;
-    if (
-      colFilters.sendFrom.length &&
-      !colFilters.sendFrom.includes(o.sendFromName)
-    )
-      return false;
-    if (colFilters.sendTo.length && !colFilters.sendTo.includes(o.vendorName))
-      return false;
-    if (
-      colFilters.vehicleNo.length &&
-      !colFilters.vehicleNo.includes(o.vehicleNo)
-    )
-      return false;
-    if (
-      colFilters.issuedBy.length &&
-      !colFilters.issuedBy.includes(o.issuedBy)
-    )
-      return false;
-    if (
-      colFilters.dispatchedQty.length &&
-      !colFilters.dispatchedQty.includes(String(dispatchedQty))
-    )
-      return false;
-    if (
-      colFilters.receivedQty.length &&
-      !colFilters.receivedQty.includes(String(receivedQty))
-    )
-      return false;
-    if (
-      colFilters.status.length &&
-      !colFilters.status.includes(statusLabel(o))
-    )
-      return false;
-    return true;
-  });
+        if (colFilters.challanNo.length && !colFilters.challanNo.includes(o.srNo))
+          return false;
+        if (
+          colFilters.date.length &&
+          !colFilters.date.includes(formatDate(o.date))
+        )
+          return false;
+        if (
+          colFilters.sendFrom.length &&
+          !colFilters.sendFrom.includes(o.sendFromName)
+        )
+          return false;
+        if (colFilters.sendTo.length && !colFilters.sendTo.includes(o.vendorName))
+          return false;
+        if (
+          colFilters.vehicleNo.length &&
+          !colFilters.vehicleNo.includes(o.vehicleNo)
+        )
+          return false;
+        if (
+          colFilters.issuedBy.length &&
+          !colFilters.issuedBy.includes(o.issuedBy)
+        )
+          return false;
+        if (
+          colFilters.dispatchedQty.length &&
+          !colFilters.dispatchedQty.includes(String(dispatchedQty))
+        )
+          return false;
+        if (
+          colFilters.receivedQty.length &&
+          !colFilters.receivedQty.includes(String(receivedQty))
+        )
+          return false;
+        if (
+          colFilters.status.length &&
+          !colFilters.status.includes(statusLabel(o))
+        )
+          return false;
+        return true;
+      }),
+    [orders, colFilters],
+  );
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(visible, 25);
 

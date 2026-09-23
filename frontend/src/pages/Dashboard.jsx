@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import {
@@ -11,6 +11,7 @@ import {
 } from "../api/api";
 import { useAuth } from "../context/AuthContext";
 import { formatNum, formatINR, toDDMMYYYY } from "../utils/helpers";
+import { buildQtyMaps } from "../utils/stockMaps";
 import {
   BarChart,
   Bar,
@@ -1812,40 +1813,36 @@ export default function Dashboard() {
     load();
   }, [load]);
 
-  // Shared computed values
-  const counts = requests.reduce((acc, r) => {
-    acc[r.status] = (acc[r.status] || 0) + 1;
-    return acc;
-  }, {});
+  // Shared computed values — memoized so role dashboards don't re-scan
+  // ~15k transaction rows on every render.
+  const { counts, posByPrId, stockMap, lowStockItems } = useMemo(() => {
+    const counts = requests.reduce((acc, r) => {
+      acc[r.status] = (acc[r.status] || 0) + 1;
+      return acc;
+    }, {});
 
-  const posByPrId = pos.reduce((acc, po) => {
-    const key = String(po.prId);
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(po);
-    return acc;
-  }, {});
+    const posByPrId = pos.reduce((acc, po) => {
+      const key = String(po.prId);
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(po);
+      return acc;
+    }, {});
 
-  const inTotals = {},
-    outTotals = {};
-  inward.forEach((e) => {
-    inTotals[e.name] = (inTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-  });
-  outward.forEach((e) => {
-    outTotals[e.name] = (outTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-  });
-
-  const stockMap = {};
-  master.forEach((m) => {
-    stockMap[m.name] = (inTotals[m.name] || 0) - (outTotals[m.name] || 0);
-  });
-
-  const lowStockItems = master
-    .map((m) => {
-      const stock = (inTotals[m.name] || 0) - (outTotals[m.name] || 0);
+    const { inMap, outMap } = buildQtyMaps(inward, outward);
+    const stockMap = {};
+    const lowStockItems = [];
+    for (const m of master) {
+      const k = (m.name || "").trim().toLowerCase();
+      const stock = (inMap.get(k) || 0) - (outMap.get(k) || 0);
+      stockMap[m.name] = stock;
       const minStock = parseFloat(m.minStock) || 0;
-      return { ...m, stock, minStock };
-    })
-    .filter((m) => m.minStock > 0 && m.stock < m.minStock);
+      if (minStock > 0 && stock < minStock) {
+        lowStockItems.push({ ...m, stock, minStock });
+      }
+    }
+
+    return { counts, posByPrId, stockMap, lowStockItems };
+  }, [requests, pos, master, inward, outward]);
 
   const sharedProps = {
     requests,

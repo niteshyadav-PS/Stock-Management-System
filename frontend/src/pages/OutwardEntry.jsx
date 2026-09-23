@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   getMaster,
   getOutward,
@@ -22,6 +22,11 @@ import {
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { ThFilter } from "../components/ColFilter";
+import {
+  buildQtyMaps,
+  getBalanceFromMaps,
+  sortNewestFirst,
+} from "../utils/stockMaps";
 
 const EMPTY_CF = {
   date: [],
@@ -42,16 +47,6 @@ const EMPTY_CF = {
   remarks: [],
 };
 
-function sortNewestFirst(a, b) {
-  const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  if (cb !== ca) return cb - ca;
-  const da = a.date ? new Date(a.date).getTime() : 0;
-  const db = b.date ? new Date(b.date).getTime() : 0;
-  if (db !== da) return db - da;
-  return String(b._id || "").localeCompare(String(a._id || ""));
-}
-
 function normalizeOutwardEntry(entry) {
   const reqty =
     entry.reqty ??
@@ -61,25 +56,6 @@ function normalizeOutwardEntry(entry) {
     entry.reqqty ??
     null;
   return { ...entry, reqty };
-}
-
-function getMaterialBalance(materialName, inwardEntries, outwardEntries, extraQty = 0, excludeId = null) {
-  const normalizedName = (materialName || "").trim().toLowerCase();
-  if (!normalizedName) return 0;
-
-  const totalInward = (inwardEntries || []).reduce((sum, item) => {
-    const name = (item?.name || "").trim().toLowerCase();
-    return name === normalizedName ? sum + (Number(item.qty) || 0) : sum;
-  }, 0);
-
-  const totalOutward = (outwardEntries || []).reduce((sum, item) => {
-    const name = (item?.name || "").trim().toLowerCase();
-    if (name !== normalizedName) return sum;
-    if (excludeId && item?._id === excludeId) return sum;
-    return sum + (Number(item.qty) || 0);
-  }, 0);
-
-  return totalInward - totalOutward - extraQty;
 }
 
 const EMPTY_HEADER = {
@@ -173,7 +149,7 @@ function matchesSearchText(entry, query) {
 }
 
 /* ── Edit Modal ──────────────────────────────────────────────────────────── */
-function EditModal({ entry, master, inwardEntries, outwardEntries, onSave, onClose }) {
+function EditModal({ entry, master, stockMaps, onSave, onClose }) {
   const [form, setForm] = useState({
     date: entry.date || "",
     project: entry.project || "",
@@ -239,7 +215,13 @@ function EditModal({ entry, master, inwardEntries, outwardEntries, onSave, onClo
     }
 
     const qty = parseFloat(form.qty);
-    const available = getMaterialBalance(form.name, inwardEntries, outwardEntries, 0, entry._id);
+    const available = getBalanceFromMaps(
+      form.name,
+      stockMaps.inMap,
+      stockMaps.outMap,
+      0,
+      entry,
+    );
     if (qty > available) {
       setErr(`Insufficient stock for ${form.name}. Available balance: ${available}`);
       return;
@@ -583,44 +565,97 @@ export default function OutwardEntry() {
     setEntries(unwrapList(e).map(normalizeOutwardEntry));
     setInwardEntries(unwrapList(i));
   }, []);
+
+  // After create/edit/delete only outward changes — skip re-fetching master + all inward.
+  const reloadOutward = useCallback(async () => {
+    const e = await getOutward();
+    setEntries(unwrapList(e).map(normalizeOutwardEntry));
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
 
-  const searched = entries.filter((entry) => {
-    return (
-      isDateInRange(entry.date, fromDate, toDate) &&
-      matchesSearchText(entry, searchText)
-    );
-  });
-  const filteredEntries = searched
-    .filter((e) => {
-      const hasReqty =
-        e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
-      const rem = hasReqty ? Number(e.reqty) - Number(e.qty) : null;
-      return (
-        (!cf.date.length || cf.date.includes(formatDateDMY(e.date))) &&
-        (!cf.project.length || cf.project.includes(e.project || "—")) &&
-        (!cf.custpo.length || cf.custpo.includes(e.custpo || "—")) &&
-        (!cf.slip.length || cf.slip.includes(e.slip || "—")) &&
-        (!cf.dept.length || cf.dept.includes(e.dept || "—")) &&
-        (!cf.recby.length || cf.recby.includes(e.recby || "—")) &&
-        (!cf.by.length || cf.by.includes(e.by || "—")) &&
-        (!cf.name.length || cf.name.includes(e.name)) &&
-        (!cf.type.length || cf.type.includes(e.type)) &&
-        (!cf.code.length || cf.code.includes(e.code)) &&
-        (!cf.category.length || cf.category.includes(e.category)) &&
-        (!cf.reqty.length ||
-          cf.reqty.includes(hasReqty ? String(formatNum(e.reqty)) : "—")) &&
-        (!cf.qty.length || cf.qty.includes(String(formatNum(e.qty)))) &&
-        (!cf.uom.length || cf.uom.includes(e.uom)) &&
-        (!cf.remqty.length ||
-          cf.remqty.includes(hasReqty ? String(formatNum(rem)) : "—")) &&
-        (!cf.remarks.length || cf.remarks.includes(e.remarks || "—"))
-      );
-    })
-    .slice()
-    .sort(sortNewestFirst);
+  const stockMaps = useMemo(
+    () => buildQtyMaps(inwardEntries, entries),
+    [inwardEntries, entries],
+  );
+
+  const searched = useMemo(
+    () =>
+      entries.filter(
+        (entry) =>
+          isDateInRange(entry.date, fromDate, toDate) &&
+          matchesSearchText(entry, searchText),
+      ),
+    [entries, fromDate, toDate, searchText],
+  );
+
+  const filteredEntries = useMemo(
+    () =>
+      searched
+        .filter((e) => {
+          const hasReqty =
+            e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
+          const rem = hasReqty ? Number(e.reqty) - Number(e.qty) : null;
+          return (
+            (!cf.date.length || cf.date.includes(formatDateDMY(e.date))) &&
+            (!cf.project.length || cf.project.includes(e.project || "—")) &&
+            (!cf.custpo.length || cf.custpo.includes(e.custpo || "—")) &&
+            (!cf.slip.length || cf.slip.includes(e.slip || "—")) &&
+            (!cf.dept.length || cf.dept.includes(e.dept || "—")) &&
+            (!cf.recby.length || cf.recby.includes(e.recby || "—")) &&
+            (!cf.by.length || cf.by.includes(e.by || "—")) &&
+            (!cf.name.length || cf.name.includes(e.name)) &&
+            (!cf.type.length || cf.type.includes(e.type)) &&
+            (!cf.code.length || cf.code.includes(e.code)) &&
+            (!cf.category.length || cf.category.includes(e.category)) &&
+            (!cf.reqty.length ||
+              cf.reqty.includes(hasReqty ? String(formatNum(e.reqty)) : "—")) &&
+            (!cf.qty.length || cf.qty.includes(String(formatNum(e.qty)))) &&
+            (!cf.uom.length || cf.uom.includes(e.uom)) &&
+            (!cf.remqty.length ||
+              cf.remqty.includes(hasReqty ? String(formatNum(rem)) : "—")) &&
+            (!cf.remarks.length || cf.remarks.includes(e.remarks || "—"))
+          );
+        })
+        .slice()
+        .sort(sortNewestFirst),
+    [searched, cf],
+  );
+
+  const colOpts = useMemo(
+    () => ({
+      date: searched.map((e) => formatDateDMY(e.date)),
+      project: searched.map((e) => e.project || "—"),
+      custpo: searched.map((e) => e.custpo || "—"),
+      slip: searched.map((e) => e.slip || "—"),
+      dept: searched.map((e) => e.dept || "—"),
+      recby: searched.map((e) => e.recby || "—"),
+      by: searched.map((e) => e.by || "—"),
+      name: searched.map((e) => e.name),
+      type: searched.map((e) => e.type),
+      code: searched.map((e) => e.code),
+      category: searched.map((e) => e.category),
+      reqty: searched.map((e) =>
+        e.reqty !== undefined && e.reqty !== null && e.reqty !== ""
+          ? String(formatNum(e.reqty))
+          : "—",
+      ),
+      qty: searched.map((e) => String(formatNum(e.qty))),
+      uom: searched.map((e) => e.uom),
+      remqty: searched.map((e) => {
+        const hasReqty =
+          e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
+        return hasReqty
+          ? String(formatNum(Number(e.reqty) - Number(e.qty)))
+          : "—";
+      }),
+      remarks: searched.map((e) => e.remarks || "—"),
+    }),
+    [searched],
+  );
+
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredEntries, 25);
 
@@ -665,7 +700,7 @@ export default function OutwardEntry() {
         await deleteOutward(id);
       }
       setSelectedIds(new Set());
-      await load();
+      await reloadOutward();
     } catch (err) {
       alert("Error: " + err.message);
     } finally {
@@ -676,7 +711,7 @@ export default function OutwardEntry() {
   async function handleEditSave(id, data) {
     await updateOutward(id, data);
     setEditEntry(null);
-    load();
+    reloadOutward();
   }
 
   async function handleDelete(e) {
@@ -688,7 +723,7 @@ export default function OutwardEntry() {
       return;
     try {
       await deleteOutward(e._id);
-      load();
+      reloadOutward();
     } catch (err) {
       alert("Error: " + err.message);
     }
@@ -791,7 +826,12 @@ export default function OutwardEntry() {
       const name = it.name.trim();
       const qty = parseFloat(it.qty);
       const pendingBefore = pendingByName.get(name) || 0;
-      const available = getMaterialBalance(name, inwardEntries, entries, pendingBefore);
+      const available = getBalanceFromMaps(
+        name,
+        stockMaps.inMap,
+        stockMaps.outMap,
+        pendingBefore,
+      );
       if (qty > available) {
         setMsg({
           text: `Insufficient stock for ${name}. Available balance: ${available}`,
@@ -821,7 +861,7 @@ export default function OutwardEntry() {
       });
       setHeader({ ...EMPTY_HEADER, date: todayStr() });
       setItems([{ ...EMPTY_ITEM }]);
-      load();
+      reloadOutward();
       setTimeout(() => setMsg({ text: "", ok: true }), 4000);
     } catch (err) {
       setMsg({ text: "Error: " + err.message, ok: false });
@@ -927,7 +967,7 @@ export default function OutwardEntry() {
         text: `✓ ${res.inserted} entr${res.inserted === 1 ? "y" : "ies"} imported.${skipped ? ` ${skipped} skipped.` : ""}`,
         ok: true,
       });
-      load();
+      reloadOutward();
     } catch (err) {
       setBulkMsg({ text: "Error: " + err.message, ok: false });
     }
@@ -1071,8 +1111,7 @@ export default function OutwardEntry() {
         <EditModal
           entry={editEntry}
           master={master}
-          inwardEntries={inwardEntries}
-          outwardEntries={entries}
+          stockMaps={stockMaps}
           onSave={handleEditSave}
           onClose={() => setEditEntry(null)}
         />
@@ -1591,112 +1630,100 @@ export default function OutwardEntry() {
                 )}
                 <ThFilter
                   label="Date"
-                  values={searched.map((e) => formatDateDMY(e.date))}
+                  values={colOpts.date}
                   selected={cf.date}
                   onChange={(v) => setCf((f) => ({ ...f, date: v }))}
                 />
                 <ThFilter
                   label="Project"
-                  values={searched.map((e) => e.project || "—")}
+                  values={colOpts.project}
                   selected={cf.project}
                   onChange={(v) => setCf((f) => ({ ...f, project: v }))}
                 />
                 <ThFilter
                   label="Cust. PO"
-                  values={searched.map((e) => e.custpo || "—")}
+                  values={colOpts.custpo}
                   selected={cf.custpo}
                   onChange={(v) => setCf((f) => ({ ...f, custpo: v }))}
                 />
                 <ThFilter
                   label="Slip no"
-                  values={searched.map((e) => e.slip || "—")}
+                  values={colOpts.slip}
                   selected={cf.slip}
                   onChange={(v) => setCf((f) => ({ ...f, slip: v }))}
                 />
                 <ThFilter
                   label="Dept."
-                  values={searched.map((e) => e.dept || "—")}
+                  values={colOpts.dept}
                   selected={cf.dept}
                   onChange={(v) => setCf((f) => ({ ...f, dept: v }))}
                 />
                 <ThFilter
                   label="Rec. By"
-                  values={searched.map((e) => e.recby || "—")}
+                  values={colOpts.recby}
                   selected={cf.recby}
                   onChange={(v) => setCf((f) => ({ ...f, recby: v }))}
                 />
                 <ThFilter
                   label="Issued by"
-                  values={searched.map((e) => e.by || "—")}
+                  values={colOpts.by}
                   selected={cf.by}
                   onChange={(v) => setCf((f) => ({ ...f, by: v }))}
                 />
                 <ThFilter
                   label="Material"
-                  values={searched.map((e) => e.name)}
+                  values={colOpts.name}
                   selected={cf.name}
                   onChange={(v) => setCf((f) => ({ ...f, name: v }))}
                 />
                 <ThFilter
                   label="Type"
-                  values={searched.map((e) => e.type)}
+                  values={colOpts.type}
                   selected={cf.type}
                   onChange={(v) => setCf((f) => ({ ...f, type: v }))}
                 />
                 <ThFilter
                   label="Code"
-                  values={searched.map((e) => e.code)}
+                  values={colOpts.code}
                   selected={cf.code}
                   onChange={(v) => setCf((f) => ({ ...f, code: v }))}
                 />
                 <ThFilter
                   label="Category"
-                  values={searched.map((e) => e.category)}
+                  values={colOpts.category}
                   selected={cf.category}
                   onChange={(v) => setCf((f) => ({ ...f, category: v }))}
                 />
                 <ThFilter
                   className="num"
                   label="Req. Qty"
-                  values={searched.map((e) =>
-                    e.reqty !== undefined && e.reqty !== null && e.reqty !== ""
-                      ? String(formatNum(e.reqty))
-                      : "—",
-                  )}
+                  values={colOpts.reqty}
                   selected={cf.reqty}
                   onChange={(v) => setCf((f) => ({ ...f, reqty: v }))}
                 />
                 <ThFilter
                   className="num"
                   label="Qty"
-                  values={searched.map((e) => String(formatNum(e.qty)))}
+                  values={colOpts.qty}
                   selected={cf.qty}
                   onChange={(v) => setCf((f) => ({ ...f, qty: v }))}
                 />
                 <ThFilter
                   label="UOM"
-                  values={searched.map((e) => e.uom)}
+                  values={colOpts.uom}
                   selected={cf.uom}
                   onChange={(v) => setCf((f) => ({ ...f, uom: v }))}
                 />
                 <ThFilter
                   className="num"
                   label="Rem. Qty"
-                  values={searched.map((e) => {
-                    const hasReqty =
-                      e.reqty !== undefined &&
-                      e.reqty !== null &&
-                      e.reqty !== "";
-                    return hasReqty
-                      ? String(formatNum(Number(e.reqty) - Number(e.qty)))
-                      : "—";
-                  })}
+                  values={colOpts.remqty}
                   selected={cf.remqty}
                   onChange={(v) => setCf((f) => ({ ...f, remqty: v }))}
                 />
                 <ThFilter
                   label="Remarks"
-                  values={searched.map((e) => e.remarks || "—")}
+                  values={colOpts.remarks}
                   selected={cf.remarks}
                   onChange={(v) => setCf((f) => ({ ...f, remarks: v }))}
                 />

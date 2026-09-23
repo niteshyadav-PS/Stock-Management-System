@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   getMaster,
@@ -24,6 +24,7 @@ import {
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { ThFilter } from "../components/ColFilter";
+import { sortNewestFirst } from "../utils/stockMaps";
 
 const EMPTY_CF = {
   date: [],
@@ -43,16 +44,6 @@ const EMPTY_CF = {
   remarks: [],
   price: [],
 };
-
-function sortNewestFirst(a, b) {
-  const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  if (cb !== ca) return cb - ca;
-  const da = a.date ? new Date(a.date).getTime() : 0;
-  const db = b.date ? new Date(b.date).getTime() : 0;
-  if (db !== da) return db - da;
-  return String(b._id || "").localeCompare(String(a._id || ""));
-}
 
 const EMPTY = {
   date: todayStr(),
@@ -632,6 +623,14 @@ export default function InwardEntry() {
     setEntries(unwrapList(e));
     setPoList(pos);
   }, []);
+
+  // After create/edit/delete only inward (+ pending POs) change — skip master re-fetch.
+  const reloadInward = useCallback(async () => {
+    const [e, pos] = await Promise.all([getInward(), getPendingInwardPOs()]);
+    setEntries(unwrapList(e));
+    setPoList(pos);
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
@@ -656,48 +655,82 @@ export default function InwardEntry() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, poList, navigate, location.pathname]);
 
-  const searched = entries.filter((entry) => {
-    return (
-      isDateInRange(entry.date, fromDate, toDate) &&
-      matchesSearchText(entry, searchText)
-    );
-  });
-  const filteredEntries = searched
-    .filter(
-      (e) =>
-        (!cf.date.length || cf.date.includes(formatDateDMY(e.date))) &&
-        (!cf.invdate.length ||
-          cf.invdate.includes(e.invdate ? formatDateDMY(e.invdate) : "—")) &&
-        (!cf.challan.length || cf.challan.includes(e.challan || "—")) &&
-        (!cf.po.length || cf.po.includes(e.po || "—")) &&
-        (!cf.vendor.length || cf.vendor.includes(e.vendor || "—")) &&
-        (!cf.name.length || cf.name.includes(e.name)) &&
-        (!cf.type.length || cf.type.includes(e.type)) &&
-        (!cf.code.length || cf.code.includes(e.code)) &&
-        (!cf.category.length || cf.category.includes(e.category)) &&
-        (!cf.uom.length || cf.uom.includes(e.uom)) &&
-        (!cf.qty.length || cf.qty.includes(String(formatNum(e.qty)))) &&
-        (!cf.gin.length || cf.gin.includes(e.gin || "—")) &&
-        (!cf.by.length || cf.by.includes(e.by || "—")) &&
-        (!cf.location.length || cf.location.includes(e.location || "—")) &&
-        (!cf.remarks.length || cf.remarks.includes(e.remarks || "—")) &&
-        (!cf.price.length ||
-          cf.price.includes(String(formatNum(e.price)))),
-    )
-    .slice()
-    .sort(sortNewestFirst);
+  const searched = useMemo(
+    () =>
+      entries.filter(
+        (entry) =>
+          isDateInRange(entry.date, fromDate, toDate) &&
+          matchesSearchText(entry, searchText),
+      ),
+    [entries, fromDate, toDate, searchText],
+  );
+
+  const filteredEntries = useMemo(
+    () =>
+      searched
+        .filter(
+          (e) =>
+            (!cf.date.length || cf.date.includes(formatDateDMY(e.date))) &&
+            (!cf.invdate.length ||
+              cf.invdate.includes(e.invdate ? formatDateDMY(e.invdate) : "—")) &&
+            (!cf.challan.length || cf.challan.includes(e.challan || "—")) &&
+            (!cf.po.length || cf.po.includes(e.po || "—")) &&
+            (!cf.vendor.length || cf.vendor.includes(e.vendor || "—")) &&
+            (!cf.name.length || cf.name.includes(e.name)) &&
+            (!cf.type.length || cf.type.includes(e.type)) &&
+            (!cf.code.length || cf.code.includes(e.code)) &&
+            (!cf.category.length || cf.category.includes(e.category)) &&
+            (!cf.uom.length || cf.uom.includes(e.uom)) &&
+            (!cf.qty.length || cf.qty.includes(String(formatNum(e.qty)))) &&
+            (!cf.gin.length || cf.gin.includes(e.gin || "—")) &&
+            (!cf.by.length || cf.by.includes(e.by || "—")) &&
+            (!cf.location.length || cf.location.includes(e.location || "—")) &&
+            (!cf.remarks.length || cf.remarks.includes(e.remarks || "—")) &&
+            (!cf.price.length ||
+              cf.price.includes(String(formatNum(e.price)))),
+        )
+        .slice()
+        .sort(sortNewestFirst),
+    [searched, cf],
+  );
+
+  const colOpts = useMemo(
+    () => ({
+      date: searched.map((e) => formatDateDMY(e.date)),
+      invdate: searched.map((e) =>
+        e.invdate ? formatDateDMY(e.invdate) : "—",
+      ),
+      challan: searched.map((e) => e.challan || "—"),
+      po: searched.map((e) => e.po || "—"),
+      vendor: searched.map((e) => e.vendor || "—"),
+      name: searched.map((e) => e.name),
+      type: searched.map((e) => e.type),
+      code: searched.map((e) => e.code),
+      category: searched.map((e) => e.category),
+      uom: searched.map((e) => e.uom),
+      qty: searched.map((e) => String(formatNum(e.qty))),
+      gin: searched.map((e) => e.gin || "—"),
+      by: searched.map((e) => e.by || "—"),
+      location: searched.map((e) => e.location || "—"),
+      remarks: searched.map((e) => e.remarks || "—"),
+      price: searched.map((e) => String(formatNum(e.price))),
+    }),
+    [searched],
+  );
+
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredEntries, 25);
 
   // ── PO search/filter for the searchable PO Number field ───────────────
-  const filteredPoList = poList.filter((po) => {
+  const filteredPoList = useMemo(() => {
     const q = poSearch.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      po.poNumber?.toLowerCase().includes(q) ||
-      po.vendorName?.toLowerCase().includes(q)
+    if (!q) return poList;
+    return poList.filter(
+      (po) =>
+        po.poNumber?.toLowerCase().includes(q) ||
+        po.vendorName?.toLowerCase().includes(q),
     );
-  });
+  }, [poList, poSearch]);
 
   /* ── Duplicate detection logic — DISABLED ─────────────────────────────
   function findDuplicates(fromArg, toArg) {
@@ -993,7 +1026,7 @@ export default function InwardEntry() {
         });
         setForm({ ...EMPTY, date: form.date });
         setPoRows([]);
-        load();
+        reloadInward();
         setTimeout(() => setMsg({ text: "", ok: true }), 5000);
       } catch (err) {
         setMsg({ text: "Error: " + err.message, ok: false });
@@ -1056,7 +1089,7 @@ export default function InwardEntry() {
         });
         setForm({ ...EMPTY, date: todayStr() });
         setManualRows([emptyManualRow()]);
-        load();
+        reloadInward();
         setTimeout(() => setMsg({ text: "", ok: true }), 4000);
       } catch (err) {
         setMsg({ text: "Error: " + err.message, ok: false });
@@ -1072,7 +1105,7 @@ export default function InwardEntry() {
       by: data.by === OTHER_VALUE ? "" : data.by,
     });
     setEditEntry(null);
-    load();
+    reloadInward();
   }
 
   async function handleDelete(e) {
@@ -1084,7 +1117,7 @@ export default function InwardEntry() {
       return;
     try {
       await deleteInward(e._id);
-      load();
+      reloadInward();
     } catch (err) {
       alert("Error: " + err.message);
     }
@@ -1306,7 +1339,7 @@ export default function InwardEntry() {
         parts.push(`${skippedRows.length} skipped — see details below.`);
       setBulkMsg({ text: parts.join(" "), ok: true });
       setPending(null);
-      load();
+      reloadInward();
     } catch (err) {
       setBulkMsg({ text: "Error: " + err.message, ok: false });
     } finally {
@@ -2464,94 +2497,92 @@ export default function InwardEntry() {
               <tr>
                 <ThFilter
                   label="Date"
-                  values={searched.map((e) => formatDateDMY(e.date))}
+                  values={colOpts.date}
                   selected={cf.date}
                   onChange={(v) => setCf((f) => ({ ...f, date: v }))}
                 />
                 <ThFilter
                   label="Inv date"
-                  values={searched.map((e) =>
-                    e.invdate ? formatDateDMY(e.invdate) : "—",
-                  )}
+                  values={colOpts.invdate}
                   selected={cf.invdate}
                   onChange={(v) => setCf((f) => ({ ...f, invdate: v }))}
                 />
                 <ThFilter
                   label="Challan / Inv no"
-                  values={searched.map((e) => e.challan || "—")}
+                  values={colOpts.challan}
                   selected={cf.challan}
                   onChange={(v) => setCf((f) => ({ ...f, challan: v }))}
                 />
                 <ThFilter
                   label="PO no"
-                  values={searched.map((e) => e.po || "—")}
+                  values={colOpts.po}
                   selected={cf.po}
                   onChange={(v) => setCf((f) => ({ ...f, po: v }))}
                 />
                 <ThFilter
                   label="Vendor"
-                  values={searched.map((e) => e.vendor || "—")}
+                  values={colOpts.vendor}
                   selected={cf.vendor}
                   onChange={(v) => setCf((f) => ({ ...f, vendor: v }))}
                 />
                 <ThFilter
                   label="Material"
-                  values={searched.map((e) => e.name)}
+                  values={colOpts.name}
                   selected={cf.name}
                   onChange={(v) => setCf((f) => ({ ...f, name: v }))}
                 />
                 <ThFilter
                   label="Type"
-                  values={searched.map((e) => e.type)}
+                  values={colOpts.type}
                   selected={cf.type}
                   onChange={(v) => setCf((f) => ({ ...f, type: v }))}
                 />
                 <ThFilter
                   label="Code"
-                  values={searched.map((e) => e.code)}
+                  values={colOpts.code}
                   selected={cf.code}
                   onChange={(v) => setCf((f) => ({ ...f, code: v }))}
                 />
                 <ThFilter
                   label="Category"
-                  values={searched.map((e) => e.category)}
+                  values={colOpts.category}
                   selected={cf.category}
                   onChange={(v) => setCf((f) => ({ ...f, category: v }))}
                 />
                 <ThFilter
                   label="UOM"
-                  values={searched.map((e) => e.uom)}
+                  values={colOpts.uom}
                   selected={cf.uom}
                   onChange={(v) => setCf((f) => ({ ...f, uom: v }))}
                 />
                 <ThFilter
                   className="num"
                   label="Qty"
-                  values={searched.map((e) => String(formatNum(e.qty)))}
+                  values={colOpts.qty}
                   selected={cf.qty}
                   onChange={(v) => setCf((f) => ({ ...f, qty: v }))}
                 />
                 <ThFilter
                   label="GIN"
-                  values={searched.map((e) => e.gin || "—")}
+                  values={colOpts.gin}
                   selected={cf.gin}
                   onChange={(v) => setCf((f) => ({ ...f, gin: v }))}
                 />
                 <ThFilter
                   label="Rec. By"
-                  values={searched.map((e) => e.by || "—")}
+                  values={colOpts.by}
                   selected={cf.by}
                   onChange={(v) => setCf((f) => ({ ...f, by: v }))}
                 />
                 <ThFilter
                   label="Location"
-                  values={searched.map((e) => e.location || "—")}
+                  values={colOpts.location}
                   selected={cf.location}
                   onChange={(v) => setCf((f) => ({ ...f, location: v }))}
                 />
                 <ThFilter
                   label="Remarks"
-                  values={searched.map((e) => e.remarks || "—")}
+                  values={colOpts.remarks}
                   selected={cf.remarks}
                   onChange={(v) => setCf((f) => ({ ...f, remarks: v }))}
                 />
@@ -2559,7 +2590,7 @@ export default function InwardEntry() {
                   <ThFilter
                     className="num"
                     label="Price"
-                    values={searched.map((e) => String(formatNum(e.price)))}
+                    values={colOpts.price}
                     selected={cf.price}
                     onChange={(v) => setCf((f) => ({ ...f, price: v }))}
                   />

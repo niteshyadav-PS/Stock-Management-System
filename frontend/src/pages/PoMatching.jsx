@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPoMatching, unwrapList } from '../api/api';
 import {toDDMMYYYY} from '../utils/helpers';
@@ -45,9 +45,12 @@ export default function PoMatching() {
     });
   }
 
-  const counts = rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+  const counts = useMemo(
+    () => rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {}),
+    [rows],
+  );
 
-  const visible = rows.filter(r => {
+  const visible = useMemo(() => rows.filter(r => {
     if (filter !== 'all' && r.status !== filter) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -56,7 +59,7 @@ export default function PoMatching() {
              r.vendorName?.toLowerCase().includes(q);
     }
     return true;
-  });
+  }), [rows, filter, search]);
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(visible, 25);
 

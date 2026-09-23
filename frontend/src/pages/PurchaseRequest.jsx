@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -17,6 +17,7 @@ import { useAuth } from "../context/AuthContext";
 import { formatNum, todayStr } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
+import { buildStockByName } from "../utils/stockMaps";
 
 const CREATOR_ROLES  = ["admin", "store", "store_manager",  "viewer"];
 const APPROVER_ROLES = ["admin", "store_manager"];
@@ -597,21 +598,12 @@ export default function PurchaseRequest() {
       getMaster(), getPurchaseRequests(), getInward(), getOutward(),
     ]);
     const masterList = unwrapList(m);
+    const inwardArr = unwrapList(inw);
+    const outwardArr = unwrapList(out);
     setMaster(masterList);
     setRequests(unwrapList(r));
-    // Build balance map: inward - outward per material
-    const inwardArr = unwrapList(inw);
     setInwardEntries(inwardArr);
-    const inTotals = {}, outTotals = {};
-    inwardArr.forEach(e => {
-      inTotals[e.name] = (inTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-    });
-    unwrapList(out).forEach(e => {
-      outTotals[e.name] = (outTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-    });
-    const map = {};
-    masterList.forEach(mat => { map[mat.name] = (inTotals[mat.name] || 0) - (outTotals[mat.name] || 0); });
-    setStockMap(map);
+    setStockMap(buildStockByName(masterList, inwardArr, outwardArr));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -653,9 +645,18 @@ export default function PurchaseRequest() {
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state, location.pathname, master, navigate]);
 
-  const uniqueTypes = [...new Set(master.map(m => m.type).filter(Boolean))].sort();
-  const uniqueCodes = [...new Set(master.map(m => m.code).filter(Boolean))].sort();
-  const uniqueCategories = [...new Set(master.map(m => m.category).filter(Boolean))].sort();
+  const uniqueTypes = useMemo(
+    () => [...new Set(master.map((m) => m.type).filter(Boolean))].sort(),
+    [master],
+  );
+  const uniqueCodes = useMemo(
+    () => [...new Set(master.map((m) => m.code).filter(Boolean))].sort(),
+    [master],
+  );
+  const uniqueCategories = useMemo(
+    () => [...new Set(master.map((m) => m.category).filter(Boolean))].sort(),
+    [master],
+  );
 
   function resetForm() {
     setDate(todayStr());
@@ -954,52 +955,59 @@ export default function PurchaseRequest() {
     return "Partial";
   }
 
-  const statusScoped =
-    statusFilter === "all"
-      ? requests
-      : requests.filter((r) => r.status === statusFilter);
+  const statusScoped = useMemo(
+    () =>
+      statusFilter === "all"
+        ? requests
+        : requests.filter((r) => r.status === statusFilter),
+    [requests, statusFilter],
+  );
 
   const materialQ = materialSearch.trim();
 
-  const visible = statusScoped.filter((pr) => {
-    if (materialQ && !prHasMaterial(pr, materialQ)) return false;
-    if (
-      colFilters.prNumber.length &&
-      !colFilters.prNumber.includes(pr.prNumber)
-    )
-      return false;
-    if (
-      colFilters.date.length &&
-      !colFilters.date.includes(formatDDMMYYYY(pr.date))
-    )
-      return false;
-    if (
-      colFilters.projectName.length &&
-      !colFilters.projectName.includes(pr.projectName || "—")
-    )
-      return false;
-    if (
-      colFilters.requestFrom.length &&
-      !colFilters.requestFrom.includes(pr.requestFrom || "—")
-    )
-      return false;
-    if (
-      colFilters.requestedBy.length &&
-      !colFilters.requestedBy.includes(pr.requestedByName)
-    )
-      return false;
-    if (
-      colFilters.items.length &&
-      !colFilters.items.includes(String((pr.items || []).length))
-    )
-      return false;
-    if (
-      colFilters.status.length &&
-      !colFilters.status.includes(STATUS_LABEL[pr.status] || pr.status)
-    )
-      return false;
-    return true;
-  });
+  const visible = useMemo(
+    () =>
+      statusScoped.filter((pr) => {
+        if (materialQ && !prHasMaterial(pr, materialQ)) return false;
+        if (
+          colFilters.prNumber.length &&
+          !colFilters.prNumber.includes(pr.prNumber)
+        )
+          return false;
+        if (
+          colFilters.date.length &&
+          !colFilters.date.includes(formatDDMMYYYY(pr.date))
+        )
+          return false;
+        if (
+          colFilters.projectName.length &&
+          !colFilters.projectName.includes(pr.projectName || "—")
+        )
+          return false;
+        if (
+          colFilters.requestFrom.length &&
+          !colFilters.requestFrom.includes(pr.requestFrom || "—")
+        )
+          return false;
+        if (
+          colFilters.requestedBy.length &&
+          !colFilters.requestedBy.includes(pr.requestedByName)
+        )
+          return false;
+        if (
+          colFilters.items.length &&
+          !colFilters.items.includes(String((pr.items || []).length))
+        )
+          return false;
+        if (
+          colFilters.status.length &&
+          !colFilters.status.includes(STATUS_LABEL[pr.status] || pr.status)
+        )
+          return false;
+        return true;
+      }),
+    [statusScoped, materialQ, colFilters],
+  );
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(visible, 25);
