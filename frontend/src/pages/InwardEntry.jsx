@@ -78,7 +78,7 @@ const emptyManualRow = () => ({
 });
 
 /* ── Dropdown-with-Other pattern (same as Outward) ────────────────────── */
-const RECEIVED_BY_OPTIONS = ["Tanmay Patil", "Krishna Vishwakarma"];
+const RECEIVED_BY_OPTIONS = ["Rajendra Saroj","Raju Singh", "Krishna Vishwakarma"];
 const OTHER_VALUE = "__other__";
 
 function getSelectValue(value, options) {

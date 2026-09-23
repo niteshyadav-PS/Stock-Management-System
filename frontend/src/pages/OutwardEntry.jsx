@@ -80,7 +80,7 @@ const EMPTY_ITEM = {
 };
 
 const DEPARTMENT_OPTIONS = ["Production", "Site", "Maintenance"];
-const ISSUED_BY_OPTIONS = ["Tanmay Patil", "Krishna Vishwakarma"];
+const ISSUED_BY_OPTIONS = ["Raju Singh", "Krishna Vishwakarma"];
 const OTHER_VALUE = "__other__";
 
 function getSelectValue(value, options) {
