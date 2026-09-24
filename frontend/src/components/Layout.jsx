@@ -49,7 +49,7 @@ const NAV_SECTIONS = [
       {
         label: "PO Matching",
         path: "/po-matching",
-        roles: ["admin", "store_manager"],
+        roles: ["admin", "store", "store_manager"],
       },
       
     ],
