@@ -913,6 +913,10 @@ export default function InwardEntry() {
     );
   }
 
+  function removePoRow(key) {
+    setPoRows((list) => list.filter((r) => r._key !== key));
+  }
+
   function updateManualRow(key, patch) {
     setManualRows((list) =>
       list.map((r) => (r._key === key ? { ...r, ...patch } : r)),
@@ -969,6 +973,14 @@ export default function InwardEntry() {
     if (!form.po.trim()) {
       setMsg({
         text: "Please select or enter a PO number.",
+        ok: false,
+      });
+      return;
+    }
+
+    if (form.po && !poManual && poRows.length === 0) {
+      setMsg({
+        text: "No PO items left to save. Re-select the PO to load them again.",
         ok: false,
       });
       return;
@@ -2055,7 +2067,7 @@ export default function InwardEntry() {
           )}
 
           {/* PO Mode */}
-          {form.po && poRows.length > 0 && (
+          {form.po && !poManual && (
             <div>
               <div className="section-label">Materials from {form.po}</div>
               <div
@@ -2066,10 +2078,17 @@ export default function InwardEntry() {
                   marginTop: -6,
                 }}
               >
-                Edit received qty, GIN, location and remarks per item
+                Use ✕ to skip items you are not receiving now. Only the remaining
+                rows will be saved.
               </div>
+              {poRows.length === 0 && !poLoading && (
+                <p style={{ fontSize: 13, color: "var(--text-3)", margin: "8px 0 0" }}>
+                  No items left. Re-select the PO to load them again.
+                </p>
+              )}
+              {poRows.length > 0 && (
               <div className="tablewrap">
-                <table style={{ minWidth: 700 }}>
+                <table style={{ minWidth: 740 }}>
                   <thead>
                     <tr>
                       <th>Material</th>
@@ -2083,6 +2102,7 @@ export default function InwardEntry() {
                       <th style={{ minWidth: 110 }}>GIN *</th>
                       <th style={{ minWidth: 130 }}>Location *</th>
                       <th style={{ minWidth: 130 }}>Remarks</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2137,16 +2157,27 @@ export default function InwardEntry() {
                             style={{ width: "100%" }}
                           />
                         </td>
+                        <td style={tdS}>
+                          <button
+                            type="button"
+                            className="btn-del btn-sm"
+                            onClick={() => removePoRow(r._key)}
+                            title="Remove this item from this inward"
+                          >
+                            ✕
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              )}
             </div>
           )}
 
           {/* Manual Mode */}
-          {(!form.po || poManual || (!poLoading && poRows.length === 0)) && (
+          {(!form.po || poManual) && (
             <>
               <div className="section-label">Material &amp; quantity</div>
               <div className="tablewrap" style={{ marginBottom: 8 }}>
