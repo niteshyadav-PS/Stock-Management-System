@@ -7,11 +7,18 @@ import {
   getMaster,
   getInward,
   getOutward,
+  getStockSummary,
   unwrapList,
+  listMeta,
 } from "../api/api";
 import { useAuth } from "../context/AuthContext";
 import { formatNum, formatINR, toDDMMYYYY } from "../utils/helpers";
-import { buildQtyMaps } from "../utils/stockMaps";
+import {
+  summaryToMaps,
+  stockMapFromSummary,
+  summaryAsInwardRows,
+  summaryAsOutwardRows,
+} from "../utils/stockMaps";
 import {
   BarChart,
   Bar,
@@ -398,6 +405,8 @@ function AdminDashboard({
   counts,
   posByPrId,
   navigate,
+  summary,
+  pendingPrices = [],
 }) {
   const [activeFilter, setActiveFilter] = useState(null);
   const [expanded, setExpanded] = useState(null);
@@ -500,12 +509,8 @@ function AdminDashboard({
       value: Math.round(it.totalVal),
     }));
 
-  // Inward entries where a price was never entered (0 or blank) — same
-  // check used on the Purchase dashboard, surfaced here for admin too.
-  const pendingPriceItems = inward.filter(
-    (e) => !e.price || parseFloat(e.price) === 0,
-  );
-  const pendingPriceCount = pendingPriceItems.length;
+  const pendingPriceItems = pendingPrices;
+  const pendingPriceCount = summary?.totals?.pendingPriceCount || pendingPrices.length;
 
   function getFilteredPRs() {
     if (!activeFilter || activeFilter === "low-stock") return requests;
@@ -765,6 +770,11 @@ function AdminDashboard({
           {!pendingPriceItems.length && (
             <div className="empty">Every inward entry has a price set.</div>
           )}
+          {pendingPriceCount > pendingPriceItems.length && (
+            <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 8 }}>
+              Showing the latest {pendingPriceItems.length} of {pendingPriceCount}. Open Price Entry for the full list.
+            </p>
+          )}
         </div>
       ) : activeFilter === "total-pos" ? (
         <div className="card">
@@ -824,6 +834,8 @@ function PurchaseDashboard({
   counts,
   posByPrId,
   navigate,
+  summary,
+  pendingPrices = [],
 }) {
   const [activeFilter, setActiveFilter] = useState(null);
   const [expanded, setExpanded] = useState(null);
@@ -853,11 +865,8 @@ function PurchaseDashboard({
     0,
   );
 
-  // Pending item prices — inward with price = 0
-  const pendingPriceItems = inward.filter(
-    (e) => !e.price || parseFloat(e.price) === 0,
-  );
-  const pendingPriceCount = pendingPriceItems.length;
+  const pendingPriceItems = pendingPrices;
+  const pendingPriceCount = summary?.totals?.pendingPriceCount || pendingPrices.length;
 
   // Top items by value
   const inValMap = {};
@@ -1099,6 +1108,11 @@ function PurchaseDashboard({
           {!pendingPriceItems.length && (
             <div className="empty">Every inward entry has a price set.</div>
           )}
+          {pendingPriceCount > pendingPriceItems.length && (
+            <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 8 }}>
+              Showing the latest {pendingPriceItems.length} of {pendingPriceCount}. Open Price Entry for the full list.
+            </p>
+          )}
         </div>
       )}
 
@@ -1153,18 +1167,92 @@ function PurchaseDashboard({
   );
 }
 
+function RecentEntries({ kind, title, totalCount, activeFilter, onClear, showVendor }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancel = false;
+    setLoading(true);
+    const req = kind === "inward"
+      ? getInward({ page: 1, limit: 40 })
+      : getOutward({ page: 1, limit: 40 });
+    req
+      .then((data) => {
+        if (cancel) return;
+        setRows(listMeta(data).items);
+      })
+      .catch((e) => {
+        if (!cancel) setErr(e.message || "Could not load entries");
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [kind]);
+
+  return (
+    <div className="card">
+      <SectionHeader
+        title={title}
+        count={totalCount}
+        activeFilter={activeFilter}
+        onClear={onClear}
+      />
+      {loading && <p style={{ color: "var(--text-3)", fontSize: 13 }}>Loading…</p>}
+      {err && <p className="msg err">{err}</p>}
+      {!loading && !err && (
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Material</th>
+                <th>Code</th>
+                {showVendor && <th>Vendor</th>}
+                <th className="num">Qty</th>
+                <th>UOM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((e) => (
+                <tr key={e._id}>
+                  <td className="nowrap">{toDDMMYYYY(e.date)}</td>
+                  <td style={{ fontWeight: 600 }}>{e.name}</td>
+                  <td className="mono">{e.code || "—"}</td>
+                  {showVendor && <td>{e.vendor || "—"}</td>}
+                  <td className="num">{formatNum(e.qty)}</td>
+                  <td>{e.uom || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {totalCount > rows.length && (
+            <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 8 }}>
+              Showing the latest {rows.length} of {totalCount}. Open the {kind} page for the full list.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Store Dashboard ────────────────────────────────────────────────────────────
 function StoreDashboard({
   requests,
   pos,
   master,
-  inward,
   outward,
   stockMap,
   lowStockItems,
   counts,
   posByPrId,
   navigate,
+  summary,
 }) {
   const [activeFilter, setActiveFilter] = useState(null);
   const [expanded, setExpanded] = useState(null);
@@ -1187,17 +1275,10 @@ function StoreDashboard({
     .filter((r) => ["partial", "approved"].includes(r.status))
     .reduce((sum, pr) => sum + itemsToOrderCount(pr), 0);
 
-  // Inward trend — last 14 days
-  const today = new Date();
-  const trendData = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - (13 - i));
-    const dateStr = d.toISOString().slice(0, 10);
-    const qty = inward
-      .filter((e) => e.date === dateStr)
-      .reduce((s, e) => s + (parseFloat(e.qty) || 0), 0);
-    return { date: dateStr.slice(5), qty };
-  });
+  const trendData = (summary?.trend || []).map((t) => ({
+    date: String(t.date || "").slice(5),
+    qty: t.qty || 0,
+  }));
 
   // Top outward by qty
   const outTotals = {};
@@ -1250,17 +1331,13 @@ function StoreDashboard({
     {
       key: "total-inward",
       label: "Total Inward",
-      value: formatNum(
-        inward.reduce((s, e) => s + (parseFloat(e.qty) || 0), 0),
-      ),
+      value: formatNum(summary?.totals?.inQty || 0),
       cls: "teal",
     },
     {
       key: "total-outward",
       label: "Total Outward",
-      value: formatNum(
-        outward.reduce((s, e) => s + (parseFloat(e.qty) || 0), 0),
-      ),
+      value: formatNum(summary?.totals?.outQty || 0),
       cls: "rust",
     },
     {
@@ -1448,75 +1525,24 @@ function StoreDashboard({
       )}
 
       {activeFilter === "total-inward" && (
-        <div className="card">
-          <SectionHeader
-            title="All Inward Entries"
-            count={inward.length}
-            activeFilter={activeFilter}
-            onClear={() => setActiveFilter(null)}
-          />
-          <div className="tablewrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Material</th>
-                  <th>Code</th>
-                  <th>Vendor</th>
-                  <th className="num">Qty</th>
-                  <th>UOM</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inward.map((e) => (
-                  <tr key={e._id}>
-                    <td className="nowrap">{toDDMMYYYY(e.date)}</td>
-                    <td style={{ fontWeight: 600 }}>{e.name}</td>
-                    <td className="mono">{e.code || "—"}</td>
-                    <td>{e.vendor || "—"}</td>
-                    <td className="num">{formatNum(e.qty)}</td>
-                    <td>{e.uom || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <RecentEntries
+          kind="inward"
+          title="Latest inward entries"
+          totalCount={summary?.totals?.inwardCount || 0}
+          activeFilter={activeFilter}
+          onClear={() => setActiveFilter(null)}
+          showVendor
+        />
       )}
 
       {activeFilter === "total-outward" && (
-        <div className="card">
-          <SectionHeader
-            title="All Outward Entries"
-            count={outward.length}
-            activeFilter={activeFilter}
-            onClear={() => setActiveFilter(null)}
-          />
-          <div className="tablewrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Material</th>
-                  <th>Code</th>
-                  <th className="num">Qty</th>
-                  <th>UOM</th>
-                </tr>
-              </thead>
-              <tbody>
-                {outward.map((e) => (
-                  <tr key={e._id}>
-                    <td className="nowrap">{toDDMMYYYY(e.date)}</td>
-                    <td style={{ fontWeight: 600 }}>{e.name}</td>
-                    <td className="mono">{e.code || "—"}</td>
-                    <td className="num">{formatNum(e.qty)}</td>
-                    <td>{e.uom || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <RecentEntries
+          kind="outward"
+          title="Latest outward entries"
+          totalCount={summary?.totals?.outwardCount || 0}
+          activeFilter={activeFilter}
+          onClear={() => setActiveFilter(null)}
+        />
       )}
 
       {/* PR table */}
@@ -1784,25 +1810,26 @@ export default function Dashboard() {
   const [requests, setRequests] = useState([]);
   const [pos, setPos] = useState([]);
   const [master, setMaster] = useState([]);
-  const [inward, setInward] = useState([]);
-  const [outward, setOutward] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [pendingPrices, setPendingPrices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const [r, p, m, i, o] = await Promise.all([
+      const [r, p, m, s, pending] = await Promise.all([
         getPurchaseRequests(),
         getPurchaseOrders(),
         getMaster(),
-        getInward(),
-        getOutward(),
+        getStockSummary(),
+        getInward({ unpriced: 1, page: 1, limit: 50 }),
       ]);
       setRequests(unwrapList(r));
       setPos(unwrapList(p));
       setMaster(unwrapList(m));
-      setInward(unwrapList(i));
-      setOutward(unwrapList(o));
+      setSummary(s);
+      setPendingPrices(listMeta(pending).items);
+      setErr("");
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -1828,13 +1855,12 @@ export default function Dashboard() {
       return acc;
     }, {});
 
-    const { inMap, outMap } = buildQtyMaps(inward, outward);
-    const stockMap = {};
+    const { inMap, outMap } = summaryToMaps(summary);
+    const stockMap = stockMapFromSummary(master, summary);
     const lowStockItems = [];
     for (const m of master) {
       const k = (m.name || "").trim().toLowerCase();
       const stock = (inMap.get(k) || 0) - (outMap.get(k) || 0);
-      stockMap[m.name] = stock;
       const minStock = parseFloat(m.minStock) || 0;
       if (minStock > 0 && stock < minStock) {
         lowStockItems.push({ ...m, stock, minStock });
@@ -1842,14 +1868,16 @@ export default function Dashboard() {
     }
 
     return { counts, posByPrId, stockMap, lowStockItems };
-  }, [requests, pos, master, inward, outward]);
+  }, [requests, pos, master, summary]);
 
   const sharedProps = {
     requests,
     pos,
     master,
-    inward,
-    outward,
+    inward: summaryAsInwardRows(summary),
+    outward: summaryAsOutwardRows(summary),
+    summary,
+    pendingPrices,
     stockMap,
     lowStockItems,
     counts,

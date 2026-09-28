@@ -5,6 +5,7 @@ const express  = require('express');
 const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 const cors     = require('cors');
+const zlib     = require('zlib');
 
 const app = express();
 const isProd = process.env.NODE_ENV === 'production';
@@ -35,6 +36,34 @@ app.use(cors({
 // ── Body parser ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 
+// Shrink JSON responses. The host cuts off large uncompressed downloads.
+app.use((req, res, next) => {
+  const accept = String(req.headers['accept-encoding'] || '');
+  if (!/\bgzip\b/.test(accept)) return next();
+  const orig = res.json.bind(res);
+  res.json = (body) => {
+    let payload;
+    try {
+      payload = JSON.stringify(body);
+    } catch {
+      return orig(body);
+    }
+    if (payload.length < 4096) return orig(body);
+    zlib.gzip(Buffer.from(payload), (err, buf) => {
+      if (err || res.headersSent) {
+        if (!res.headersSent) return orig(body);
+        return;
+      }
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.setHeader('Content-Length', buf.length);
+      res.end(buf);
+    });
+  };
+  next();
+});
+
 // ── Chrome DevTools well-known route (silences 404 in console) ───────────────
 app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => {
   res.json({ version: '1.0', type: 'node' });
@@ -62,6 +91,7 @@ app.get('/', (req, res) => res.json({ message: 'Stockyard API is running' }));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth',    require('./routes/auth'));
+app.use('/api/stock',   require('./routes/stock'));
 app.use('/api/master',  require('./routes/master'));
 app.use('/api/inward',  require('./routes/inward'));
 app.use('/api/outward', require('./routes/outward'));

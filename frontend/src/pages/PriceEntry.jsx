@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
-import { getInward, updatePrice, unwrapList } from "../api/api";
+import { getInward, updatePrice } from "../api/api";
+import { loadInPages } from "../api/paged";
 import { formatNum, exportXlsx } from "../utils/helpers";
 // NOTE: adjust this import path if your AuthContext file lives elsewhere.
 import { useAuth } from "../context/AuthContext";
@@ -433,14 +434,36 @@ export default function PriceEntry() {
     price: [],
   });
 
+  const [listNote, setListNote] = useState("");
+  const loadGen = useRef(0);
+
   const load = useCallback(async () => {
-    const data = unwrapList(await getInward());
-    setEntries(data);
-    const init = {};
-    data.forEach((e) => {
-      init[e._id] = e.price ?? 0;
-    });
-    setPrices(init);
+    const gen = ++loadGen.current;
+    setListNote("Loading entries…");
+    let seeded = false;
+    try {
+      await loadInPages((params) => getInward(params), {
+        isCancelled: () => gen !== loadGen.current,
+        onUpdate: (rows, info) => {
+          if (gen !== loadGen.current) return;
+          const reset = !seeded;
+          seeded = true;
+          setEntries(rows);
+          setPrices((prev) => {
+            const next = reset ? {} : { ...prev };
+            for (const e of rows) {
+              if (next[e._id] === undefined) next[e._id] = e.price ?? 0;
+            }
+            return next;
+          });
+          setListNote(
+            info.complete ? "" : `Loading entries… ${rows.length} of ${info.total}`,
+          );
+        },
+      });
+    } catch (e) {
+      if (gen === loadGen.current) setListNote(e.message || "Could not load entries");
+    }
   }, []);
   useEffect(() => {
     load();
@@ -883,6 +906,11 @@ export default function PriceEntry() {
               </>
             )}
           </p>
+          {listNote && (
+            <p style={{ margin: "6px 0 0", fontSize: 12.5, color: "var(--text-3)" }}>
+              {listNote}
+            </p>
+          )}
         </div>
       </div>
 

@@ -9,15 +9,15 @@ import {
   deletePurchaseRequest,
   setPurchaseRequestStatus,
   getPurchaseOrdersByPR,
-  getInward,
-  getOutward,
+  getStockSummary,
+  getReceivedByPo,
   unwrapList,
 } from "../api/api";
 import { useAuth } from "../context/AuthContext";
 import { formatNum, todayStr } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
-import { buildStockByName } from "../utils/stockMaps";
+import { stockMapFromSummary } from "../utils/stockMaps";
 
 const CREATOR_ROLES  = ["admin", "store", "store_manager",  "viewer"];
 const APPROVER_ROLES = ["admin", "store_manager"];
@@ -573,11 +573,7 @@ export default function PurchaseRequest() {
   const [materialSearch, setMaterialSearch] = useState("");
 
   const [stockMap, setStockMap] = useState({});
-
-  // Raw inward entries — kept around (not just folded into stockMap) so we
-  // can work out, per PR, how much of each item has actually been received
-  // against the PO(s) tied to that PR.
-  const [inwardEntries, setInwardEntries] = useState([]);
+  const [receivedByPo, setReceivedByPo] = useState({});
 
   // Banner shown when this page was opened with items handed off from
   // Live Stock's "Create PR" flow (single item or several selected together).
@@ -594,16 +590,14 @@ export default function PurchaseRequest() {
   const receivedFlipInFlight = useRef(new Set());
 
   const load = useCallback(async () => {
-    const [m, r, inw, out] = await Promise.all([
-      getMaster(), getPurchaseRequests(), getInward(), getOutward(),
+    const [m, r, summary, received] = await Promise.all([
+      getMaster(), getPurchaseRequests(), getStockSummary(), getReceivedByPo(),
     ]);
     const masterList = unwrapList(m);
-    const inwardArr = unwrapList(inw);
-    const outwardArr = unwrapList(out);
     setMaster(masterList);
     setRequests(unwrapList(r));
-    setInwardEntries(inwardArr);
-    setStockMap(buildStockByName(masterList, inwardArr, outwardArr));
+    setReceivedByPo(received?.byKey || {});
+    setStockMap(stockMapFromSummary(masterList, summary));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -860,10 +854,13 @@ export default function PurchaseRequest() {
     const poNumbers = new Set();
     Object.values(poInfo.byName).forEach((v) => (v.poNumbers || []).forEach((n) => poNumbers.add(n)));
     const received = {};
-    inwardEntries.forEach((e) => {
-      if (!poNumbers.has(e.po)) return;
-      received[e.name] = (received[e.name] || 0) + (parseFloat(e.qty) || 0);
-    });
+    for (const it of pr.items || []) {
+      let qty = 0;
+      for (const po of poNumbers) {
+        qty += receivedByPo[`${po}||${it.name}`] || 0;
+      }
+      received[it.name] = qty;
+    }
     return received;
   }
 
@@ -890,7 +887,7 @@ export default function PurchaseRequest() {
         }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [poDataByPr, inwardEntries, requests]);
+  }, [poDataByPr, receivedByPo, requests]);
 
   function toggleExpanded(pr) {
     const next = expanded === pr._id ? null : pr._id;

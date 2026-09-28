@@ -45,6 +45,49 @@ export function buildStockByName(master, inwardEntries, outwardEntries) {
   return stockMap;
 }
 
+/** Balance maps from GET /api/stock/summary (grouped by material, not every row). */
+export function summaryToMaps(summary) {
+  const inMap = new Map();
+  const outMap = new Map();
+  const valueMap = new Map();
+  for (const row of summary?.items || []) {
+    const k = row.key || (row.name || "").trim().toLowerCase();
+    if (!k) continue;
+    inMap.set(k, Number(row.inQty) || 0);
+    outMap.set(k, Number(row.outQty) || 0);
+    valueMap.set(k, Number(row.inValue) || 0);
+  }
+  return { inMap, outMap, valueMap };
+}
+
+export function stockMapFromSummary(master, summary) {
+  const { inMap, outMap } = summaryToMaps(summary);
+  const stockMap = {};
+  for (const m of master || []) {
+    const k = (m.name || "").trim().toLowerCase();
+    stockMap[m.name] = (inMap.get(k) || 0) - (outMap.get(k) || 0);
+  }
+  return stockMap;
+}
+
+/** One row per material so existing dashboard charts can sum qty / value. */
+export function summaryAsInwardRows(summary) {
+  return (summary?.items || []).map((it) => ({
+    name: it.name,
+    qty: Number(it.inQty) || 0,
+    price: it.inQty > 0 ? (Number(it.inValue) || 0) / it.inQty : 0,
+  }));
+}
+
+export function summaryAsOutwardRows(summary) {
+  return (summary?.items || [])
+    .filter((it) => (Number(it.outQty) || 0) > 0)
+    .map((it) => ({
+      name: it.name,
+      qty: Number(it.outQty) || 0,
+    }));
+}
+
 /** Sort newest entries first (createdAt → date → _id). */
 export function sortNewestFirst(a, b) {
   const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;

@@ -8,8 +8,7 @@ import {
   createPurchaseOrder,
   healPendingCreatePOs,
   getPurchaseOrders,
-  getInward,
-  getOutward,
+  getStockSummary,
   savePrItemPrices,
   deletePurchaseOrder,
   updatePurchaseOrder,
@@ -20,7 +19,7 @@ import { useAuth } from "../context/AuthContext";
 import { todayStr, toDDMMYYYY } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
-import { buildStockByName } from "../utils/stockMaps";
+import { stockMapFromSummary } from "../utils/stockMaps";
 
 const STATUS_LABEL = {
   pending: "Pending",
@@ -137,17 +136,16 @@ export default function PurchaseOrders() {
 
   const load = useCallback(async () => {
     try {
-      const [m, reqs, pos, inw, out] = await Promise.all([
+      const [m, reqs, pos, summary] = await Promise.all([
         getMaster(),
         getPurchaseRequests(),
         getPurchaseOrders(),
-        getInward(),
-        getOutward(),
+        getStockSummary(),
       ]);
       const masterList = unwrapList(m);
       const requestList = unwrapList(reqs);
       const posList = unwrapList(pos);
-      const map = buildStockByName(masterList, unwrapList(inw), unwrapList(out));
+      const map = stockMapFromSummary(masterList, summary);
 
       // Show data immediately — never block the table on heal
       setStockMap(map);

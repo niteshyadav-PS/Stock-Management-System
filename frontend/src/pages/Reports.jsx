@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { getMaster, getInward, getOutward, unwrapList } from "../api/api";
+import { loadInPages } from "../api/paged";
 import { useAuth } from "../context/AuthContext";
 import { formatNum, formatINR, exportXlsx, todayStr, toDDMMYYYY } from "../utils/helpers";
 import Pagination from "../components/Pagination";
@@ -414,15 +415,52 @@ export default function Reports() {
     remarks: [],
   });
 
+  const [listNote, setListNote] = useState("");
+  const loadGen = useRef(0);
+
   const load = useCallback(async () => {
-    const [m, i, o] = await Promise.all([
-      getMaster(),
-      getInward(),
-      getOutward(),
-    ]);
-    setMaster(unwrapList(m));
-    setInward(unwrapList(i));
-    setOutward(unwrapList(o));
+    const gen = ++loadGen.current;
+    try {
+      const m = await getMaster();
+      if (gen !== loadGen.current) return;
+      setMaster(unwrapList(m));
+      setListNote("Loading report data…");
+      let inDone = false;
+      let outDone = false;
+      const finish = () => {
+        if (gen === loadGen.current && inDone && outDone) setListNote("");
+      };
+      await Promise.all([
+        loadInPages((params) => getInward(params), {
+          isCancelled: () => gen !== loadGen.current,
+          onUpdate: (rows, info) => {
+            if (gen !== loadGen.current) return;
+            setInward(rows);
+            if (info.complete) {
+              inDone = true;
+              finish();
+            } else {
+              setListNote(`Loading inward… ${rows.length} of ${info.total}`);
+            }
+          },
+        }),
+        loadInPages((params) => getOutward(params), {
+          isCancelled: () => gen !== loadGen.current,
+          onUpdate: (rows, info) => {
+            if (gen !== loadGen.current) return;
+            setOutward(rows);
+            if (info.complete) {
+              outDone = true;
+              finish();
+            } else {
+              setListNote(`Loading outward… ${rows.length} of ${info.total}`);
+            }
+          },
+        }),
+      ]);
+    } catch (e) {
+      if (gen === loadGen.current) setListNote(e.message || "Could not load report");
+    }
   }, []);
   useEffect(() => {
     load();
@@ -767,6 +805,11 @@ export default function Reports() {
               Filter and export records. "Both (combined)" shows a
               stock-overview style balance per material.
             </p>
+            {listNote && (
+              <p style={{ margin: "6px 0 0", fontSize: 12.5, color: "var(--text-3)" }}>
+                {listNote}
+              </p>
+            )}
           </div>
         </div>
 

@@ -11,6 +11,7 @@ import {
   getPurchaseOrderByNumber,
   unwrapList,
 } from "../api/api";
+import { loadInPages } from "../api/paged";
 import { useAuth } from "../context/AuthContext";
 import {
   formatNum,
@@ -599,6 +600,8 @@ export default function InwardEntry() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [cf, setCf] = useState(EMPTY_CF);
+  const [listNote, setListNote] = useState("");
+  const loadGen = useRef(0);
 
   // ── Staged upload (waits for confirmation) ────────────────────────────
   const [pending, setPending] = useState(null);
@@ -613,23 +616,56 @@ export default function InwardEntry() {
   // const [dupFrom, setDupFrom] = useState("");
   // const [dupTo, setDupTo] = useState("");
 
-  const load = useCallback(async () => {
-    const [m, e, pos] = await Promise.all([
-      getMaster(),
-      getInward(),
-      getPendingInwardPOs(),
-    ]);
-    setMaster(unwrapList(m));
-    setEntries(unwrapList(e));
-    setPoList(pos);
+  const loadEntries = useCallback(async (gen) => {
+    setListNote("Loading entries…");
+    try {
+      await loadInPages((params) => getInward(params), {
+        isCancelled: () => gen !== loadGen.current,
+        onUpdate: (rows, info) => {
+          if (gen !== loadGen.current) return;
+          setEntries(rows);
+          setListNote(
+            info.complete ? "" : `Loading entries… ${rows.length} of ${info.total}`,
+          );
+        },
+      });
+    } catch (e) {
+      if (gen === loadGen.current) setListNote(e.message || "Could not load entries");
+    }
   }, []);
+
+  const load = useCallback(async () => {
+    const gen = ++loadGen.current;
+    const entriesPromise = loadEntries(gen);
+    try {
+      const [m, pos] = await Promise.all([
+        getMaster(),
+        getPendingInwardPOs().catch((e) => {
+          if (gen === loadGen.current) setMsg({ text: e.message, ok: false });
+          return [];
+        }),
+      ]);
+      if (gen !== loadGen.current) return;
+      setMaster(unwrapList(m));
+      setPoList(Array.isArray(pos) ? pos : []);
+      await entriesPromise;
+    } catch (e) {
+      if (gen === loadGen.current) setMsg({ text: e.message, ok: false });
+    }
+  }, [loadEntries]);
 
   // After create/edit/delete only inward (+ pending POs) change — skip master re-fetch.
   const reloadInward = useCallback(async () => {
-    const [e, pos] = await Promise.all([getInward(), getPendingInwardPOs()]);
-    setEntries(unwrapList(e));
-    setPoList(pos);
-  }, []);
+    const gen = ++loadGen.current;
+    try {
+      const pos = await getPendingInwardPOs();
+      if (gen !== loadGen.current) return;
+      setPoList(Array.isArray(pos) ? pos : []);
+      await loadEntries(gen);
+    } catch (e) {
+      if (gen === loadGen.current) setMsg({ text: e.message, ok: false });
+    }
+  }, [loadEntries]);
 
   useEffect(() => {
     load();
@@ -2507,6 +2543,11 @@ export default function InwardEntry() {
         <h3>
           All inward entries{" "}
           <span className="pill-count">{filteredEntries.length || 0}</span>
+          {listNote && (
+            <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
+              {listNote}
+            </span>
+          )}
         </h3>
         <div
           className="tablewrap"

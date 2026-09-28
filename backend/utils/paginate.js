@@ -3,7 +3,7 @@
  * Returns null when the caller did not ask for pagination (backward compatible
  * full-list responses).
  */
-function parsePagination(query = {}, { defaultLimit = 25, maxLimit = 200 } = {}) {
+function parsePagination(query = {}, { defaultLimit = 25, maxLimit = 500 } = {}) {
   const hasPage = query.page !== undefined && query.page !== "";
   const hasLimit = query.limit !== undefined && query.limit !== "";
   if (!hasPage && !hasLimit) return null;

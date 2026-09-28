@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   getMaster,
   getOutward,
-  getInward,
+  getStockSummary,
   addOutward,
   bulkOutward,
   updateOutward,
   deleteOutward,
   unwrapList,
 } from "../api/api";
+import { loadInPages } from "../api/paged";
 import { useAuth } from "../context/AuthContext";
 import {
   formatNum,
@@ -23,7 +24,7 @@ import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { ThFilter } from "../components/ColFilter";
 import {
-  buildQtyMaps,
+  summaryToMaps,
   getBalanceFromMaps,
   sortNewestFirst,
 } from "../utils/stockMaps";
@@ -545,7 +546,9 @@ export default function OutwardEntry() {
 
   const [master, setMaster] = useState([]);
   const [entries, setEntries] = useState([]);
-  const [inwardEntries, setInwardEntries] = useState([]);
+  const [stockMaps, setStockMaps] = useState({ inMap: new Map(), outMap: new Map() });
+  const [listNote, setListNote] = useState("");
+  const loadGen = useRef(0);
   const [header, setHeader] = useState(EMPTY_HEADER);
   const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
   const [msg, setMsg] = useState({ text: "", ok: true });
@@ -559,27 +562,63 @@ export default function OutwardEntry() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  const load = useCallback(async () => {
-    const [m, e, i] = await Promise.all([getMaster(), getOutward(), getInward()]);
-    setMaster(unwrapList(m));
-    setEntries(unwrapList(e).map(normalizeOutwardEntry));
-    setInwardEntries(unwrapList(i));
+  const loadEntries = useCallback(async (gen) => {
+    setListNote("Loading entries…");
+    try {
+      await loadInPages((params) => getOutward(params), {
+        isCancelled: () => gen !== loadGen.current,
+        onUpdate: (rows, info) => {
+          if (gen !== loadGen.current) return;
+          setEntries(rows.map(normalizeOutwardEntry));
+          setListNote(
+            info.complete ? "" : `Loading entries… ${rows.length} of ${info.total}`,
+          );
+        },
+      });
+    } catch (e) {
+      if (gen === loadGen.current) setListNote(e.message || "Could not load entries");
+    }
   }, []);
 
-  // After create/edit/delete only outward changes — skip re-fetching master + all inward.
-  const reloadOutward = useCallback(async () => {
-    const e = await getOutward();
-    setEntries(unwrapList(e).map(normalizeOutwardEntry));
+  const applySummary = useCallback((summary) => {
+    const maps = summaryToMaps(summary);
+    setStockMaps({ inMap: maps.inMap, outMap: maps.outMap });
   }, []);
+
+  const load = useCallback(async () => {
+    const gen = ++loadGen.current;
+    const entriesPromise = loadEntries(gen);
+    try {
+      const [m, summary] = await Promise.all([getMaster(), getStockSummary()]);
+      if (gen !== loadGen.current) return;
+      setMaster(unwrapList(m));
+      applySummary(summary);
+      await entriesPromise;
+    } catch (e) {
+      if (gen === loadGen.current) {
+        setMsg({ text: e.message || "Could not load entries", ok: false });
+      }
+    }
+  }, [applySummary, loadEntries]);
+
+  // After create/edit/delete, refresh balances and the list. Skip the master list.
+  const reloadOutward = useCallback(async () => {
+    const gen = ++loadGen.current;
+    try {
+      const summary = await getStockSummary();
+      if (gen !== loadGen.current) return;
+      applySummary(summary);
+      await loadEntries(gen);
+    } catch (e) {
+      if (gen === loadGen.current) {
+        setMsg({ text: e.message || "Could not reload entries", ok: false });
+      }
+    }
+  }, [applySummary, loadEntries]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  const stockMaps = useMemo(
-    () => buildQtyMaps(inwardEntries, entries),
-    [inwardEntries, entries],
-  );
 
   const searched = useMemo(
     () =>
@@ -1597,6 +1636,11 @@ export default function OutwardEntry() {
         <h3>
           All outward entries{" "}
           <span className="pill-count">{filteredEntries.length || 0}</span>
+          {listNote && (
+            <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
+              {listNote}
+            </span>
+          )}
         </h3>
         <div
           className="tablewrap"

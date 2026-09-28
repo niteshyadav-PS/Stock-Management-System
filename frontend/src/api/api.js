@@ -103,6 +103,9 @@ export const deleteInward = (id) => client.delete(`/inward/${id}`);
 
 // ── Outward ───────────────────────────────────────────────────────────────────
 export const getOutward = (params) => client.get(withQuery("/outward", params || {}));
+
+export const getStockSummary = () => client.get("/stock/summary");
+export const getReceivedByPo = () => client.get("/stock/received-by-po");
 export const addOutward = (data) => client.post("/outward", data);
 export const bulkOutward = (entries) =>
   client.post("/outward/bulk", { entries });

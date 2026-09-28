@@ -81,7 +81,15 @@ async function checkAndReceivePR(poNumbers, byName, byUsername) {
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
-    const result = await paginateQuery(Inward, {}, {
+    const filter = {};
+    if (String(req.query.unpriced || '') === '1') {
+      filter.$or = [
+        { price: { $exists: false } },
+        { price: null },
+        { price: 0 },
+      ];
+    }
+    const result = await paginateQuery(Inward, filter, {
       sort: { createdAt: -1 },
       pagination,
     });

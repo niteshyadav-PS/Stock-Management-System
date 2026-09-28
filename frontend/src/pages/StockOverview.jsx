@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { getMaster, getInward, getOutward, unwrapList } from "../api/api";
+import { getMaster, getStockSummary, unwrapList } from "../api/api";
 import { useAuth } from "../context/AuthContext";
 import { formatNum, formatINR, formatInt } from "../utils/helpers";
 import * as XLSX from "xlsx";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import ColFilter from "../components/ColFilter";
-import { buildQtyMaps } from "../utils/stockMaps";
+import { summaryToMaps } from "../utils/stockMaps";
 import {
   BarChart,
   Bar,
@@ -119,8 +119,8 @@ export default function StockOverview() {
   const canSeePrice = user?.role === "admin" || user?.role === "purchase";
 
   const [master, setMaster] = useState([]);
-  const [inward, setInward] = useState([]);
-  const [outward, setOutward] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loadErr, setLoadErr] = useState("");
   const [search, setSearch] = useState("");
   const [activeCard, setActiveCard] = useState(null);
   const [activeChart, setActiveChart] = useState("top-balance"); // which chart to show
@@ -149,14 +149,14 @@ export default function StockOverview() {
   const isNarrow = viewportWidth < 480;
 
   const load = useCallback(async () => {
-    const [m, i, o] = await Promise.all([
-      getMaster(),
-      getInward(),
-      getOutward(),
-    ]);
-    setMaster(unwrapList(m));
-    setInward(unwrapList(i));
-    setOutward(unwrapList(o));
+    try {
+      const [m, s] = await Promise.all([getMaster(), getStockSummary()]);
+      setMaster(unwrapList(m));
+      setSummary(s);
+      setLoadErr("");
+    } catch (e) {
+      setLoadErr(e.message || "Could not load stock");
+    }
   }, []);
   useEffect(() => {
     load();
@@ -164,27 +164,16 @@ export default function StockOverview() {
 
   const { allRows, totalIn, totalOut, totalVal, lowCount, zeroCount, lowStockItems, zeroStockItems } =
     useMemo(() => {
-      const { inMap, outMap } = buildQtyMaps(inward, outward);
-      const inValTotals = {};
-      for (const e of inward) {
-        const k = (e.name || "").trim().toLowerCase();
-        if (!k) continue;
-        inValTotals[k] =
-          (inValTotals[k] || 0) +
-          (parseFloat(e.qty) || 0) * (parseFloat(e.price) || 0);
-      }
-
-      let tIn = 0;
-      let tOut = 0;
-      for (const v of inMap.values()) tIn += v;
-      for (const v of outMap.values()) tOut += v;
+      const { inMap, outMap, valueMap } = summaryToMaps(summary);
+      const tIn = summary?.totals?.inQty || 0;
+      const tOut = summary?.totals?.outQty || 0;
 
       const rows = master.map((m) => {
         const k = (m.name || "").trim().toLowerCase();
         const inQty = inMap.get(k) || 0;
         const outQty = outMap.get(k) || 0;
         const stock = inQty - outQty;
-        const avgPrice = inQty > 0 ? (inValTotals[k] || 0) / inQty : 0;
+        const avgPrice = inQty > 0 ? (valueMap.get(k) || 0) / inQty : 0;
         const totalVal = avgPrice * Math.max(stock, 0);
         const minStock = parseFloat(m.minStock) || 0;
         return { ...m, inQty, outQty, stock, minStock, avgPrice, totalVal };
@@ -205,7 +194,7 @@ export default function StockOverview() {
         lowStockItems,
         zeroStockItems,
       };
-    }, [master, inward, outward]);
+    }, [master, summary]);
 
   // A row qualifies for a Purchase Request when it's out of stock, or below
   // its configured minimum stock.
@@ -481,6 +470,11 @@ export default function StockOverview() {
         overflowX: "hidden",
       }}
     >
+      {loadErr && (
+        <p className="msg err" style={{ marginBottom: 16 }}>
+          Error loading data: {loadErr}
+        </p>
+      )}
       <style>{`
         .stock-overview * { box-sizing: border-box; }
         .stock-overview .statrow {
