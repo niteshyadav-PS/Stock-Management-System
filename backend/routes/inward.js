@@ -1,5 +1,6 @@
 const router          = require('express').Router();
 const Inward          = require('../models/Inward');
+const Material        = require('../models/Material');
 const PurchaseOrder   = require('../models/PurchaseOrder');
 const PurchaseRequest = require('../models/PurchaseRequest');
 const { authMiddleware, requireRole } = require('../middleware/auth');
@@ -94,6 +95,89 @@ router.get('/', authMiddleware, async (req, res) => {
       pagination,
     });
     res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+const NAME_FIELDS = ['vendor', 'category'];
+
+// Distinct vendor or category spellings, with how many inward rows use each.
+router.get('/name-values', authMiddleware, requireRole('admin', 'purchase'), async (req, res) => {
+  try {
+    const field = String(req.query.field || '');
+    if (!NAME_FIELDS.includes(field)) {
+      return res.status(400).json({ error: 'Choose vendor or category.' });
+    }
+    const rows = await Inward.aggregate([
+      { $match: { [field]: { $nin: [null, ''] } } },
+      { $group: { _id: `$${field}`, count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+    ]);
+    res.json({
+      field,
+      values: rows
+        .filter((row) => String(row._id || '').trim())
+        .map((row) => ({ value: String(row._id), count: row.count || 0 })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Merge selected spellings into one name on inward rows.
+// Category is also updated on the material master and purchase-order lines,
+// and vendor on purchase orders, so the next entry does not bring the old spelling back.
+router.post('/rename-names', authMiddleware, requireRole('admin', 'purchase'), async (req, res) => {
+  try {
+    const field = String(req.body.field || '');
+    if (!NAME_FIELDS.includes(field)) {
+      return res.status(400).json({ error: 'Choose vendor or category.' });
+    }
+    const to = String(req.body.to || '').trim().replace(/\s+/g, ' ');
+    if (!to) return res.status(400).json({ error: 'Enter the name to use.' });
+
+    const from = [...new Set(
+      (Array.isArray(req.body.from) ? req.body.from : [])
+        .map((value) => String(value ?? ''))
+        .filter((value) => value.trim() && value !== to)
+    )];
+    if (!from.length) {
+      return res.status(400).json({ error: 'Select at least one name to change.' });
+    }
+    if (from.length > 200) {
+      return res.status(400).json({ error: 'Select fewer names at once.' });
+    }
+
+    const inwardResult = await Inward.updateMany(
+      { [field]: { $in: from } },
+      { $set: { [field]: to } }
+    );
+
+    let materialsUpdated = 0;
+    let ordersUpdated = 0;
+    if (field === 'category') {
+      const materialResult = await Material.updateMany(
+        { category: { $in: from } },
+        { $set: { category: to } }
+      );
+      materialsUpdated = materialResult.modifiedCount || 0;
+      const orderResult = await PurchaseOrder.updateMany(
+        { 'items.category': { $in: from } },
+        { $set: { 'items.$[line].category': to } },
+        { arrayFilters: [{ 'line.category': { $in: from } }] }
+      );
+      ordersUpdated = orderResult.modifiedCount || 0;
+    } else {
+      const orderResult = await PurchaseOrder.updateMany(
+        { vendorName: { $in: from } },
+        { $set: { vendorName: to } }
+      );
+      ordersUpdated = orderResult.modifiedCount || 0;
+    }
+
+    res.json({
+      updated: inwardResult.modifiedCount || 0,
+      materialsUpdated,
+      ordersUpdated,
+      to,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

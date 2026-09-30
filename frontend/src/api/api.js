@@ -94,6 +94,10 @@ export const deleteMaterial = (id) => client.delete(`/master/${id}`);
 
 // ── Inward ────────────────────────────────────────────────────────────────────
 export const getInward = (params) => client.get(withQuery("/inward", params || {}));
+export const getInwardNameValues = (field) =>
+  client.get(withQuery("/inward/name-values", { field }));
+export const renameInwardNames = (field, from, to) =>
+  client.post("/inward/rename-names", { field, from, to });
 export const addInward = (data) => client.post("/inward", data);
 export const bulkInward = (entries) => client.post("/inward/bulk", { entries });
 export const updatePrice = (id, price) =>

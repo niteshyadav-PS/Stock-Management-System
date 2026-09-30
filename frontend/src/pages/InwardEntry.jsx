@@ -25,6 +25,7 @@ import {
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { ThFilter } from "../components/ColFilter";
+import RenameFieldNames from "../components/RenameFieldNames";
 import { sortNewestFirst } from "../utils/stockMaps";
 
 const EMPTY_CF = {
@@ -570,6 +571,7 @@ export default function InwardEntry() {
   const location = useLocation();
   const canSeePrice = user?.role === "admin" || user?.role === "purchase";
   const canEditDelete = user?.role === "admin"|| user?.role === "store" || user?.role === "store_manager";
+  const canRenameNames = user?.role === "admin" || user?.role === "purchase";
 
   const [master, setMaster] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -582,6 +584,7 @@ export default function InwardEntry() {
   const [skippedRows, setSkippedRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [poManual, setPoManual] = useState(false);
   const [poRows, setPoRows] = useState([]);
   const [poLoading, setPoLoading] = useState(false);
@@ -1622,7 +1625,18 @@ export default function InwardEntry() {
             master list.
           </p>
         </div>
+        {canRenameNames && (
+          <button type="button" className="btn btn-ghost" onClick={() => setRenameOpen(true)}>
+            Fix duplicate names
+          </button>
+        )}
       </div>
+      {canRenameNames && renameOpen && (
+        <RenameFieldNames
+          onClose={() => setRenameOpen(false)}
+          onRenamed={reloadInward}
+        />
+      )}
 
       {/* ── Bulk upload ── */}
       <div className="card">
