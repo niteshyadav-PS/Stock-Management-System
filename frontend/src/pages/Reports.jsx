@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { formatNum, formatINR, exportXlsx, todayStr, toDDMMYYYY } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
+import NumSort, { sortNumeric } from "../components/NumSort";
 
 // ── Excel-style dropdown filter — portal-based, with Apply button ────────────
 function ColFilter({ values, selected, onChange, formatLabel }) {
@@ -377,6 +378,7 @@ export default function Reports() {
   const [outward, setOutward] = useState([]);
 
   const [repType, setRepType] = useState("inward");
+  const [numSort, setNumSort] = useState(null);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [category, setCategory] = useState("");
@@ -465,6 +467,10 @@ export default function Reports() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    setNumSort(null);
+  }, [repType]);
 
   // ── Helpers for Required Qty / Remaining Qty (outward entries only) ───────
   function hasReqty(r) {
@@ -615,7 +621,7 @@ export default function Reports() {
         "Minimum Stock",
       ];
       if (canSeePrice) headers.push("Avg Price", "Stock Value");
-      const dataRows = filteredRows.map((r) => {
+      const dataRows = sortedRows.map((r) => {
         const row = [
           r.name,
           r.type,
@@ -651,7 +657,7 @@ export default function Reports() {
       if (repType !== "outward" && canSeePrice) headers.push("Price", "Value");
       if (repType !== "inward") headers.push("Project");
       headers.push("Remarks");
-      const dataRows = filteredRows.map((r) => {
+      const dataRows = sortedRows.map((r) => {
         const row = [
           toDDMMYYYY(r.date),
           r.name,
@@ -736,8 +742,28 @@ export default function Reports() {
     }
   }), [rows, repType, cfBoth, cfTxn]);
 
+  const sortedRows = useMemo(
+    () =>
+      sortNumeric(filteredRows, numSort, (row, key) => {
+        if (key === "qty") return parseFloat(row.qty);
+        if (key === "reqty") return hasReqty(row) ? Number(row.reqty) : null;
+        if (key === "remaining") return hasReqty(row) ? remainingQty(row) : null;
+        if (key === "price") return parseFloat(row.price);
+        if (key === "value") {
+          return (parseFloat(row.qty) || 0) * (parseFloat(row.price) || 0);
+        }
+        return row[key];
+      }),
+    [filteredRows, numSort],
+  );
+
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
-    useClientPagination(filteredRows || [], 25);
+    useClientPagination(sortedRows || [], 25);
+
+  function changeNumSort(next) {
+    setNumSort(next);
+    setPage(1);
+  }
 
   // ── Summary stats ──────────────────────────────────────────────────────────
   const totalIn =
@@ -1101,6 +1127,7 @@ export default function Reports() {
                         </th>
                         <th className="num" style={{ color: "var(--green)" }}>
                           IN{" "}
+                          <NumSort column="inQty" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) => formatNum(r.inQty))}
                             selected={cfBoth.inQty}
@@ -1111,6 +1138,7 @@ export default function Reports() {
                         </th>
                         <th className="num" style={{ color: "var(--red)" }}>
                           Out{" "}
+                          <NumSort column="outQty" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) =>
                               formatNum(r.outQty),
@@ -1123,6 +1151,7 @@ export default function Reports() {
                         </th>
                         <th className="num" style={{ color: "var(--amber)" }}>
                           Bal.{" "}
+                          <NumSort column="balance" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) =>
                               formatNum(r.balance),
@@ -1135,6 +1164,7 @@ export default function Reports() {
                         </th>
                         <th className="num">
                           Min. Stock{" "}
+                          <NumSort column="minStock" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) =>
                               formatNum(r.minStock),
@@ -1149,6 +1179,7 @@ export default function Reports() {
                           <>
                             <th className="num">
                               Avg price{" "}
+                              <NumSort column="avgPrice" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(r.avgPrice),
@@ -1161,6 +1192,7 @@ export default function Reports() {
                             </th>
                             <th className="num">
                               Stock value{" "}
+                              <NumSort column="stockVal" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(r.stockVal),
@@ -1263,6 +1295,7 @@ export default function Reports() {
                         </th>
                         <th className="num">
                           Qty{" "}
+                          <NumSort column="qty" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) => formatNum(r.qty))}
                             selected={cfTxn.qty}
@@ -1275,6 +1308,7 @@ export default function Reports() {
                           <>
                             <th className="num">
                               Req. Qty{" "}
+                              <NumSort column="reqty" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   hasReqty(r) ? formatNum(r.reqty) : "—",
@@ -1287,6 +1321,7 @@ export default function Reports() {
                             </th>
                             <th className="num">
                               Rem. Qty{" "}
+                              <NumSort column="remaining" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   hasReqty(r)
@@ -1317,6 +1352,7 @@ export default function Reports() {
                           <>
                             <th className="num">
                               Price{" "}
+                              <NumSort column="price" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(r.price),
@@ -1329,6 +1365,7 @@ export default function Reports() {
                             </th>
                             <th className="num">
                               Value{" "}
+                              <NumSort column="value" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(

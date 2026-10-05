@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import ColFilter from "../components/ColFilter";
+import NumSort, { sortNumeric } from "../components/NumSort";
 import { summaryToMaps } from "../utils/stockMaps";
 import {
   BarChart,
@@ -138,6 +139,7 @@ export default function StockOverview() {
     avgPrice: [],
     totalVal: [],
   });
+  const [numSort, setNumSort] = useState(null);
 
   // ── Purchase Request selection state ──────────────────────────────────────
   // Selecting rows here doesn't create anything on this page anymore — it
@@ -299,17 +301,27 @@ export default function StockOverview() {
     [searched, activeCard, cf],
   );
 
+  const sortedRows = useMemo(
+    () => sortNumeric(rows, numSort, (row, key) => row[key]),
+    [rows, numSort],
+  );
+
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
-    useClientPagination(rows, 25);
+    useClientPagination(sortedRows, 25);
+
+  function changeNumSort(next) {
+    setNumSort(next);
+    setPage(1);
+  }
 
   // ── Excel export ──────────────────────────────────────────────────────────
   // Exports exactly what's currently visible in the table — respects the
   // search box, the active stat-card filter (low/zero stock), and every
   // column filter (cf.*), since it reads straight from `rows`.
   function exportToExcel() {
-    if (!rows.length) return;
+    if (!sortedRows.length) return;
 
-    const exportRows = rows.map((r) => {
+    const exportRows = sortedRows.map((r) => {
       const base = {
         "Material Name": r.name || "",
         Type: r.type || "",
@@ -1246,6 +1258,7 @@ export default function StockOverview() {
                     }}
                   >
                     IN{" "}
+                    <NumSort column="inQty" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.inQty))}
                       selected={cf.inQty}
@@ -1262,6 +1275,7 @@ export default function StockOverview() {
                     }}
                   >
                     Out{" "}
+                    <NumSort column="outQty" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.outQty))}
                       selected={cf.outQty}
@@ -1278,6 +1292,7 @@ export default function StockOverview() {
                     }}
                   >
                     Bal.{" "}
+                    <NumSort column="stock" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.stock))}
                       selected={cf.stock}
@@ -1294,6 +1309,7 @@ export default function StockOverview() {
                     }}
                   >
                     Min stock{" "}
+                    <NumSort column="minStock" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.minStock))}
                       selected={cf.minStock}
@@ -1328,6 +1344,7 @@ export default function StockOverview() {
                         }}
                       >
                         Avg price{" "}
+                        <NumSort column="avgPrice" sort={numSort} onSort={changeNumSort} />
                         <ColFilter
                           values={searched.map((r) => formatINR(r.avgPrice))}
                           selected={cf.avgPrice}
@@ -1346,6 +1363,7 @@ export default function StockOverview() {
                         }}
                       >
                         Stock value{" "}
+                        <NumSort column="totalVal" sort={numSort} onSort={changeNumSort} />
                         <ColFilter
                           values={searched.map((r) => formatINR(r.totalVal))}
                           selected={cf.totalVal}
