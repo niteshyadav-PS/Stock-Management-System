@@ -110,6 +110,7 @@ function ColFilter({
   function handleClear() {
     setPending([]);
     onChange([]);
+    if (onSort && column && sort?.key === column) onSort(null);
     setOpen(false);
   }
 
