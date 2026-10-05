@@ -118,6 +118,19 @@ function ColFilter({
     JSON.stringify(pending.slice().sort()) !==
     JSON.stringify(selected.slice().sort());
 
+  const filterOn = Array.isArray(selected) && selected.length > 0;
+  const sortOn = Boolean(column && sort?.key === column);
+
+  useEffect(() => {
+    const th = btnRef.current?.closest("th");
+    if (!th) return;
+    if (filterOn || sortOn) {
+      th.style.boxShadow = "inset 0 -3px 0 #1f5c52";
+    } else {
+      th.style.boxShadow = "";
+    }
+  }, [filterOn, sortOn]);
+
   const panel = (
     <div
       ref={panelRef}
@@ -395,21 +408,28 @@ function ColFilter({
         ref={btnRef}
         onClick={handleOpen}
         style={{
-          background: selected.length > 0 ? "var(--teal)" : "none",
-          border: selected.length > 0 ? "none" : "1px solid transparent",
+          backgroundColor: filterOn || sortOn ? "#1f5c52" : "transparent",
+          border: "none",
           cursor: "pointer",
           padding: "2px 6px",
           borderRadius: 4,
           fontSize: 10,
-          color: selected.length > 0 ? "#fff" : "#8a8270",
+          fontWeight: 700,
+          color: filterOn || sortOn ? "#fff" : "#8a8270",
           lineHeight: 1,
-          transition: "background 150ms",
+          verticalAlign: "middle",
         }}
         title={
-          selected.length > 0 ? `${selected.length} filter(s) active` : "Filter"
+          filterOn
+            ? `${selected.length} filter(s) active`
+            : sortOn
+              ? sort.dir === "desc"
+                ? "Sorted descending"
+                : "Sorted ascending"
+              : "Filter"
         }
       >
-        ▼
+        {sortOn ? (sort.dir === "desc" ? "▼" : "▲") : "▼"}
       </button>
       {open && createPortal(panel, document.body)}
     </>
