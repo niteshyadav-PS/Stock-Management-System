@@ -63,6 +63,47 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/** One row per material from the stock summary (real inward and outward totals). */
+function materialRows(summary) {
+  return (summary?.items || [])
+    .map((it) => {
+      const name = String(it.name || it.key || "").trim();
+      const inQty = Number(it.inQty) || 0;
+      const outQty = Number(it.outQty) || 0;
+      const inValue = Number(it.inValue) || 0;
+      const pricedQty =
+        it.pricedQty === undefined || it.pricedQty === null
+          ? inValue > 0
+            ? inQty
+            : 0
+          : Number(it.pricedQty) || 0;
+      const avgPrice = pricedQty > 0 ? inValue / pricedQty : 0;
+      const stock = inQty - outQty;
+      const round2 = (n) => Math.round(n * 100) / 100;
+      return {
+        name,
+        inQty,
+        outQty,
+        inValue: round2(inValue),
+        avgPrice: round2(avgPrice),
+        stockValue: round2(avgPrice * Math.max(stock, 0)),
+      };
+    })
+    .filter((row) => row.name);
+}
+
+function topBarRows(rows, valueKey, outKey = valueKey) {
+  return [...rows]
+    .filter((row) => row[valueKey] > 0)
+    .sort((a, b) => b[valueKey] - a[valueKey])
+    .slice(0, 10)
+    .map((row) => ({
+      name: row.name.length > 12 ? `${row.name.slice(0, 12)}…` : row.name,
+      fullName: row.name,
+      [outKey]: row[valueKey],
+    }));
+}
+
 function shortQty(v) {
   const abs = Math.abs(v);
   if (abs >= 100000)
@@ -331,11 +372,15 @@ function TopItemsBar({ data, xKey, yKey, color, label, valuePrefix }) {
         >
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis
-            dataKey={xKey}
+            dataKey="fullName"
             tick={{ fontSize: 10 }}
             angle={-40}
             textAnchor="end"
             interval={0}
+            tickFormatter={(v) => {
+              const s = String(v ?? "");
+              return s.length > 12 ? `${s.slice(0, 12)}…` : s;
+            }}
           />
           <YAxis
             tick={{ fontSize: 11 }}
@@ -434,33 +479,9 @@ function AdminDashboard({
     value: v,
   }));
 
-  // Top 10 items by inward qty
-  const inTotals = {};
-  inward.forEach((e) => {
-    inTotals[e.name] = (inTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-  });
-  const topInward = Object.entries(inTotals)
-    .map(([name, qty]) => ({
-      name: name.length > 12 ? name.slice(0, 12) + "…" : name,
-      fullName: name,
-      qty,
-    }))
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10);
-
-  // Top 10 items by outward qty
-  const outTotals = {};
-  outward.forEach((e) => {
-    outTotals[e.name] = (outTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-  });
-  const topOutward = Object.entries(outTotals)
-    .map(([name, qty]) => ({
-      name: name.length > 12 ? name.slice(0, 12) + "…" : name,
-      fullName: name,
-      qty,
-    }))
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10);
+  const materials = materialRows(summary);
+  const topInward = topBarRows(materials, "inQty", "qty");
+  const topOutward = topBarRows(materials, "outQty", "qty");
 
   // PO total value
   const totalPOValue = pos.reduce(
@@ -470,44 +491,10 @@ function AdminDashboard({
     0,
   );
 
-  // ── Pricing insight: weighted avg unit price + current stock valuation
-  // per material, computed the same way Live Stock does (avg cost from
-  // inward entries × current balance). Drives both the "Pending Item
-  // Price" stat card and the two charts below — admin-only. ────────────────
-  const inValTotals = {};
-  inward.forEach((e) => {
-    inValTotals[e.name] =
-      (inValTotals[e.name] || 0) +
-      (parseFloat(e.qty) || 0) * (parseFloat(e.price) || 0);
-  });
-  const itemValuation = master.map((m) => {
-    const inQty = inTotals[m.name] || 0;
-    const outQty = outTotals[m.name] || 0;
-    const avgPrice = inQty > 0 ? (inValTotals[m.name] || 0) / inQty : 0;
-    const stock = inQty - outQty;
-    const totalVal = avgPrice * Math.max(stock, 0);
-    return { name: m.name, avgPrice, totalVal };
-  });
-
-  const topUnitPrice = [...itemValuation]
-    .filter((it) => it.avgPrice > 0)
-    .sort((a, b) => b.avgPrice - a.avgPrice)
-    .slice(0, 10)
-    .map((it) => ({
-      name: it.name.length > 12 ? it.name.slice(0, 12) + "…" : it.name,
-      fullName: it.name,
-      price: Math.round(it.avgPrice),
-    }));
-
-  const topValuation = [...itemValuation]
-    .filter((it) => it.totalVal > 0)
-    .sort((a, b) => b.totalVal - a.totalVal)
-    .slice(0, 10)
-    .map((it) => ({
-      name: it.name.length > 12 ? it.name.slice(0, 12) + "…" : it.name,
-      fullName: it.name,
-      value: Math.round(it.totalVal),
-    }));
+  // Unit price is the average of inward lines that actually have a price.
+  // Unpriced quantity is left out so it does not pull the bar down to zero.
+  const topUnitPrice = topBarRows(materials, "avgPrice", "price");
+  const topValuation = topBarRows(materials, "stockValue", "value");
 
   const pendingPriceItems = pendingPrices;
   const pendingPriceCount = summary?.totals?.pendingPriceCount || pendingPrices.length;
@@ -868,35 +855,9 @@ function PurchaseDashboard({
   const pendingPriceItems = pendingPrices;
   const pendingPriceCount = summary?.totals?.pendingPriceCount || pendingPrices.length;
 
-  // Top items by value
-  const inValMap = {};
-  inward.forEach((e) => {
-    inValMap[e.name] =
-      (inValMap[e.name] || 0) +
-      (parseFloat(e.qty) || 0) * (parseFloat(e.price) || 0);
-  });
-  const topByValue = Object.entries(inValMap)
-    .map(([name, val]) => ({
-      name: name.length > 12 ? name.slice(0, 12) + "…" : name,
-      fullName: name,
-      val: Math.round(val),
-    }))
-    .sort((a, b) => b.val - a.val)
-    .slice(0, 10);
-
-  // Top items by qty (outward)
-  const outTotals = {};
-  outward.forEach((e) => {
-    outTotals[e.name] = (outTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-  });
-  const topOutward = Object.entries(outTotals)
-    .map(([name, qty]) => ({
-      name: name.length > 12 ? name.slice(0, 12) + "…" : name,
-      fullName: name,
-      qty,
-    }))
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10);
+  const materials = materialRows(summary);
+  const topByValue = topBarRows(materials, "inValue", "val");
+  const topOutward = topBarRows(materials, "outQty", "qty");
 
   const prStatusData = Object.entries(counts).map(([k, v]) => ({
     name: STATUS_LABEL[k] || k,
@@ -1280,19 +1241,7 @@ function StoreDashboard({
     qty: t.qty || 0,
   }));
 
-  // Top outward by qty
-  const outTotals = {};
-  outward.forEach((e) => {
-    outTotals[e.name] = (outTotals[e.name] || 0) + (parseFloat(e.qty) || 0);
-  });
-  const topOutward = Object.entries(outTotals)
-    .map(([name, qty]) => ({
-      name: name.length > 12 ? name.slice(0, 12) + "…" : name,
-      fullName: name,
-      qty,
-    }))
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10);
+  const topOutward = topBarRows(materialRows(summary), "outQty", "qty");
 
   const prStatusData = Object.entries(counts).map(([k, v]) => ({
     name: STATUS_LABEL[k] || k,

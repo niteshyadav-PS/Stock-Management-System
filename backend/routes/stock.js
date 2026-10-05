@@ -7,6 +7,9 @@ const nameKey = {
   $toLower: { $trim: { input: { $ifNull: ['$name', ''] } } },
 };
 
+const qtyNum = { $convert: { input: '$qty', to: 'double', onError: 0, onNull: 0 } };
+const priceNum = { $convert: { input: '$price', to: 'double', onError: 0, onNull: 0 } };
+
 function isoDaysAgo(days) {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -27,14 +30,14 @@ router.get('/summary', authMiddleware, async (req, res) => {
           $group: {
             _id: nameKey,
             name: { $first: '$name' },
-            inQty: { $sum: { $ifNull: ['$qty', 0] } },
+            inQty: { $sum: qtyNum },
             inValue: {
               $sum: {
-                $multiply: [
-                  { $ifNull: ['$qty', 0] },
-                  { $ifNull: ['$price', 0] },
-                ],
+                $cond: [{ $gt: [priceNum, 0] }, { $multiply: [qtyNum, priceNum] }, 0],
               },
+            },
+            pricedQty: {
+              $sum: { $cond: [{ $gt: [priceNum, 0] }, qtyNum, 0] },
             },
             count: { $sum: 1 },
           },
@@ -46,7 +49,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
           $group: {
             _id: nameKey,
             name: { $first: '$name' },
-            outQty: { $sum: { $ifNull: ['$qty', 0] } },
+            outQty: { $sum: qtyNum },
             count: { $sum: 1 },
           },
         },
@@ -76,6 +79,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
         inQty: row.inQty || 0,
         outQty: 0,
         inValue: row.inValue || 0,
+        pricedQty: row.pricedQty || 0,
       });
       inQty += row.inQty || 0;
       inValue += row.inValue || 0;
@@ -90,6 +94,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
         inQty: 0,
         outQty: 0,
         inValue: 0,
+        pricedQty: 0,
       };
       prev.outQty = row.outQty || 0;
       if (!prev.name) prev.name = row.name || key;
