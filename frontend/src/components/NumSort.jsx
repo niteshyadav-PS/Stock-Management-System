@@ -1,5 +1,3 @@
-import React from "react";
-
 function toNum(value) {
   if (value === null || value === undefined || value === "" || value === "—") return null;
   const n = typeof value === "number" ? value : parseFloat(String(value).replace(/,/g, ""));
@@ -48,56 +46,4 @@ export function sortNumeric(list, sort, getValue) {
     if (av === bv) return 0;
     return av < bv ? -sign : sign;
   });
-}
-
-/** ▲ ascending, ▼ descending. Click the active arrow again to clear. */
-export default function NumSort({ column, sort, onSort, kind = "number" }) {
-  const active = sort?.key === column && (sort.type || "number") === kind;
-
-  function press(dir) {
-    onSort(active && sort.dir === dir ? null : { key: column, dir, type: kind });
-  }
-
-  function button(dir, label, title) {
-    const on = active && sort.dir === dir;
-    return (
-      <button
-        type="button"
-        title={
-          kind === "text"
-            ? dir === "asc"
-              ? "Sort A to Z"
-              : "Sort Z to A"
-            : title
-        }
-        aria-label={
-          kind === "text"
-            ? dir === "asc"
-              ? "Sort A to Z"
-              : "Sort Z to A"
-            : title
-        }
-        onClick={() => press(dir)}
-        style={{
-          border: "none",
-          background: on ? "var(--teal)" : "transparent",
-          color: on ? "#fff" : "#8a8270",
-          cursor: "pointer",
-          fontSize: 9,
-          lineHeight: 1,
-          padding: "1px 3px",
-          borderRadius: 3,
-        }}
-      >
-        {label}
-      </button>
-    );
-  }
-
-  return (
-    <span style={{ display: "inline-flex", flexDirection: "column", marginLeft: 2, verticalAlign: "middle" }}>
-      {button("asc", "▲", "Sort ascending")}
-      {button("desc", "▼", "Sort descending")}
-    </span>
-  );
 }

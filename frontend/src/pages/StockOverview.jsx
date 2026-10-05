@@ -8,7 +8,7 @@ import * as XLSX from "xlsx";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import ColFilter from "../components/ColFilter";
-import NumSort, { sortNumeric } from "../components/NumSort";
+import { sortByColumn } from "../components/NumSort";
 import { summaryToMaps } from "../utils/stockMaps";
 import {
   BarChart,
@@ -302,7 +302,7 @@ export default function StockOverview() {
   );
 
   const sortedRows = useMemo(
-    () => sortNumeric(rows, numSort, (row, key) => row[key]),
+    () => sortByColumn(rows, numSort, (row, key) => row[key]),
     [rows, numSort],
   );
 
@@ -1198,6 +1198,10 @@ export default function StockOverview() {
                       values={searched.map((r) => r.name)}
                       selected={cf.name}
                       onChange={(v) => setCf((f) => ({ ...f, name: v }))}
+                      column="name"
+                      sortKind="text"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1214,6 +1218,10 @@ export default function StockOverview() {
                       values={searched.map((r) => r.type)}
                       selected={cf.type}
                       onChange={(v) => setCf((f) => ({ ...f, type: v }))}
+                      column="type"
+                      sortKind="text"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1230,6 +1238,10 @@ export default function StockOverview() {
                       values={searched.map((r) => r.category)}
                       selected={cf.category}
                       onChange={(v) => setCf((f) => ({ ...f, category: v }))}
+                      column="category"
+                      sortKind="text"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1246,6 +1258,10 @@ export default function StockOverview() {
                       values={searched.map((r) => r.code)}
                       selected={cf.code}
                       onChange={(v) => setCf((f) => ({ ...f, code: v }))}
+                      column="code"
+                      sortKind="text"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1258,11 +1274,14 @@ export default function StockOverview() {
                     }}
                   >
                     IN{" "}
-                    <NumSort column="inQty" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.inQty))}
                       selected={cf.inQty}
                       onChange={(v) => setCf((f) => ({ ...f, inQty: v }))}
+                      column="inQty"
+                      sortKind="number"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1275,11 +1294,14 @@ export default function StockOverview() {
                     }}
                   >
                     Out{" "}
-                    <NumSort column="outQty" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.outQty))}
                       selected={cf.outQty}
                       onChange={(v) => setCf((f) => ({ ...f, outQty: v }))}
+                      column="outQty"
+                      sortKind="number"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1292,11 +1314,14 @@ export default function StockOverview() {
                     }}
                   >
                     Bal.{" "}
-                    <NumSort column="stock" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.stock))}
                       selected={cf.stock}
                       onChange={(v) => setCf((f) => ({ ...f, stock: v }))}
+                      column="stock"
+                      sortKind="number"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1309,11 +1334,14 @@ export default function StockOverview() {
                     }}
                   >
                     Min stock{" "}
-                    <NumSort column="minStock" sort={numSort} onSort={changeNumSort} />
                     <ColFilter
                       values={searched.map((r) => formatNum(r.minStock))}
                       selected={cf.minStock}
                       onChange={(v) => setCf((f) => ({ ...f, minStock: v }))}
+                      column="minStock"
+                      sortKind="number"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1330,6 +1358,10 @@ export default function StockOverview() {
                       values={searched.map((r) => r.uom)}
                       selected={cf.uom}
                       onChange={(v) => setCf((f) => ({ ...f, uom: v }))}
+                      column="uom"
+                      sortKind="text"
+                      sort={numSort}
+                      onSort={changeNumSort}
                     />
                   </span>
                 </th>
@@ -1344,13 +1376,16 @@ export default function StockOverview() {
                         }}
                       >
                         Avg price{" "}
-                        <NumSort column="avgPrice" sort={numSort} onSort={changeNumSort} />
                         <ColFilter
                           values={searched.map((r) => formatINR(r.avgPrice))}
                           selected={cf.avgPrice}
                           onChange={(v) =>
                             setCf((f) => ({ ...f, avgPrice: v }))
                           }
+                          column="avgPrice"
+                          sortKind="number"
+                          sort={numSort}
+                          onSort={changeNumSort}
                         />
                       </span>
                     </th>
@@ -1363,13 +1398,16 @@ export default function StockOverview() {
                         }}
                       >
                         Stock value{" "}
-                        <NumSort column="totalVal" sort={numSort} onSort={changeNumSort} />
                         <ColFilter
                           values={searched.map((r) => formatINR(r.totalVal))}
                           selected={cf.totalVal}
                           onChange={(v) =>
                             setCf((f) => ({ ...f, totalVal: v }))
                           }
+                          column="totalVal"
+                          sortKind="number"
+                          sort={numSort}
+                          onSort={changeNumSort}
                         />
                       </span>
                     </th>

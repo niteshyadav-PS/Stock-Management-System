@@ -2,7 +2,15 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 
 /** Excel-style multi-select column filter (same UX as Live Stock). */
-export default function ColFilter({ values, selected, onChange }) {
+export default function ColFilter({
+  values,
+  selected,
+  onChange,
+  column,
+  sortKind = "text",
+  sort,
+  onSort,
+}) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState([]);
@@ -31,7 +39,7 @@ export default function ColFilter({ values, selected, onChange }) {
   function handleOpen() {
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      const panelH = 360;
+      const panelH = onSort ? 420 : 360;
       const panelW = Math.min(320, window.innerWidth - 16);
       const spaceBelow = window.innerHeight - rect.bottom;
       let left = rect.left + window.scrollX;
@@ -84,6 +92,14 @@ export default function ColFilter({ values, selected, onChange }) {
   function handleClear() {
     setPending([]);
     onChange([]);
+    setOpen(false);
+  }
+  function chooseSort(dir) {
+    if (!onSort || !column) return;
+    const kind = sortKind === "number" ? "number" : "text";
+    const active =
+      sort?.key === column && (sort.type || "number") === kind && sort.dir === dir;
+    onSort(active ? null : { key: column, dir, type: kind });
     setOpen(false);
   }
 
@@ -159,6 +175,41 @@ export default function ColFilter({ values, selected, onChange }) {
           ✕
         </button>
       </div>
+      {onSort && column && (
+        <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: "1px solid var(--line)" }}>
+          {[
+            ["asc", "Sort ascending"],
+            ["desc", "Sort descending"],
+          ].map(([dir, label]) => {
+            const kind = sortKind === "number" ? "number" : "text";
+            const on =
+              sort?.key === column &&
+              (sort.type || "number") === kind &&
+              sort.dir === dir;
+            return (
+              <button
+                key={dir}
+                type="button"
+                onClick={() => chooseSort(dir)}
+                style={{
+                  flex: 1,
+                  fontSize: 12,
+                  padding: "6px 4px",
+                  border: "1.5px solid var(--line)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  background: on ? "var(--teal)" : "#fff",
+                  color: on ? "#fff" : "var(--ink)",
+                  fontFamily: "Inter, Poppins, sans-serif",
+                  fontWeight: 600,
+                }}
+              >
+                {dir === "asc" ? "▲" : "▼"} {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div
         onClick={toggleAll}
         style={{
@@ -333,13 +384,13 @@ export default function ColFilter({ values, selected, onChange }) {
         ref={btnRef}
         onClick={handleOpen}
         style={{
-          background: selected.length > 0 ? "var(--teal)" : "none",
+          background: selected.length > 0 || sort?.key === column ? "var(--teal)" : "none",
           border: "none",
           cursor: "pointer",
           padding: "2px 6px",
           borderRadius: 4,
           fontSize: 10,
-          color: selected.length > 0 ? "#fff" : "#8a8270",
+          color: selected.length > 0 || sort?.key === column ? "#fff" : "#8a8270",
           lineHeight: 1,
           flexShrink: 0,
         }}

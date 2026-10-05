@@ -6,10 +6,19 @@ import { useAuth } from "../context/AuthContext";
 import { formatNum, formatINR, exportXlsx, todayStr, toDDMMYYYY } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
-import NumSort, { sortNumeric } from "../components/NumSort";
+import { sortByColumn } from "../components/NumSort";
 
 // ── Excel-style dropdown filter — portal-based, with Apply button ────────────
-function ColFilter({ values, selected, onChange, formatLabel }) {
+function ColFilter({
+  values,
+  selected,
+  onChange,
+  formatLabel,
+  column,
+  sortKind = "text",
+  sort,
+  onSort,
+}) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState([]);
@@ -180,6 +189,44 @@ function ColFilter({ values, selected, onChange, formatLabel }) {
           ✕
         </button>
       </div>
+      {onSort && column && (
+        <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: "1px solid var(--line)" }}>
+          {[
+            ["asc", "Sort ascending"],
+            ["desc", "Sort descending"],
+          ].map(([dir, label]) => {
+            const kind = sortKind === "number" ? "number" : "text";
+            const on =
+              sort?.key === column &&
+              (sort.type || "number") === kind &&
+              sort.dir === dir;
+            return (
+              <button
+                key={dir}
+                type="button"
+                onClick={() => {
+                  onSort(on ? null : { key: column, dir, type: kind });
+                  setOpen(false);
+                }}
+                style={{
+                  flex: 1,
+                  fontSize: 12,
+                  padding: "6px 4px",
+                  border: "1.5px solid var(--line)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  background: on ? "var(--teal)" : "#fff",
+                  color: on ? "#fff" : "var(--ink)",
+                  fontFamily: "Inter, Poppins, sans-serif",
+                  fontWeight: 600,
+                }}
+              >
+                {dir === "asc" ? "▲" : "▼"} {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div
         onClick={toggleAll}
         style={{
@@ -744,7 +791,7 @@ export default function Reports() {
 
   const sortedRows = useMemo(
     () =>
-      sortNumeric(filteredRows, numSort, (row, key) => {
+      sortByColumn(filteredRows, numSort, (row, key) => {
         if (key === "qty") return parseFloat(row.qty);
         if (key === "reqty") return hasReqty(row) ? Number(row.reqty) : null;
         if (key === "remaining") return hasReqty(row) ? remainingQty(row) : null;
@@ -1083,6 +1130,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, name: v }))
                             }
+                            column="name"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1093,6 +1144,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, type: v }))
                             }
+                            column="type"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1103,6 +1158,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, category: v }))
                             }
+                            column="category"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1113,6 +1172,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, code: v }))
                             }
+                            column="code"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1123,22 +1186,28 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, uom: v }))
                             }
+                            column="uom"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th className="num" style={{ color: "var(--green)" }}>
                           IN{" "}
-                          <NumSort column="inQty" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) => formatNum(r.inQty))}
                             selected={cfBoth.inQty}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, inQty: v }))
                             }
+                            column="inQty"
+                            sortKind="number"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th className="num" style={{ color: "var(--red)" }}>
                           Out{" "}
-                          <NumSort column="outQty" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) =>
                               formatNum(r.outQty),
@@ -1147,11 +1216,14 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, outQty: v }))
                             }
+                            column="outQty"
+                            sortKind="number"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th className="num" style={{ color: "var(--amber)" }}>
                           Bal.{" "}
-                          <NumSort column="balance" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) =>
                               formatNum(r.balance),
@@ -1160,11 +1232,14 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, balance: v }))
                             }
+                            column="balance"
+                            sortKind="number"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th className="num">
                           Min. Stock{" "}
-                          <NumSort column="minStock" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) =>
                               formatNum(r.minStock),
@@ -1173,13 +1248,16 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, minStock: v }))
                             }
+                            column="minStock"
+                            sortKind="number"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         {canSeePrice && (
                           <>
                             <th className="num">
                               Avg price{" "}
-                              <NumSort column="avgPrice" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(r.avgPrice),
@@ -1188,11 +1266,14 @@ export default function Reports() {
                                 onChange={(v) =>
                                   setCfBoth((f) => ({ ...f, avgPrice: v }))
                                 }
+                                column="avgPrice"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
                               />
                             </th>
                             <th className="num">
                               Stock value{" "}
-                              <NumSort column="stockVal" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(r.stockVal),
@@ -1201,6 +1282,10 @@ export default function Reports() {
                                 onChange={(v) =>
                                   setCfBoth((f) => ({ ...f, stockVal: v }))
                                 }
+                                column="stockVal"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
                               />
                             </th>
                           </>
@@ -1251,6 +1336,10 @@ export default function Reports() {
                               setCfTxn((f) => ({ ...f, date: v }))
                             }
                             formatLabel={toDDMMYYYY}
+                            column="date"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1261,6 +1350,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, name: v }))
                             }
+                            column="name"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1271,6 +1364,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, category: v }))
                             }
+                            column="category"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1281,6 +1378,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, code: v }))
                             }
+                            column="code"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th>
@@ -1291,24 +1392,30 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, uom: v }))
                             }
+                            column="uom"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         <th className="num">
                           Qty{" "}
-                          <NumSort column="qty" sort={numSort} onSort={changeNumSort} />
                           <ColFilter
                             values={(rows || []).map((r) => formatNum(r.qty))}
                             selected={cfTxn.qty}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, qty: v }))
                             }
+                            column="qty"
+                            sortKind="number"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                         {repType === "outward" && (
                           <>
                             <th className="num">
                               Req. Qty{" "}
-                              <NumSort column="reqty" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   hasReqty(r) ? formatNum(r.reqty) : "—",
@@ -1317,11 +1424,14 @@ export default function Reports() {
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, reqty: v }))
                                 }
+                                column="reqty"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
                               />
                             </th>
                             <th className="num">
                               Rem. Qty{" "}
-                              <NumSort column="remaining" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   hasReqty(r)
@@ -1332,6 +1442,10 @@ export default function Reports() {
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, remaining: v }))
                                 }
+                                column="remaining"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
                               />
                             </th>
                           </>
@@ -1345,6 +1459,10 @@ export default function Reports() {
                               onChange={(v) =>
                                 setCfTxn((f) => ({ ...f, vendor: v }))
                               }
+                              column="vendor"
+                              sortKind="text"
+                              sort={numSort}
+                              onSort={changeNumSort}
                             />
                           </th>
                         )}
@@ -1352,7 +1470,6 @@ export default function Reports() {
                           <>
                             <th className="num">
                               Price{" "}
-                              <NumSort column="price" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(r.price),
@@ -1361,11 +1478,14 @@ export default function Reports() {
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, price: v }))
                                 }
+                                column="price"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
                               />
                             </th>
                             <th className="num">
                               Value{" "}
-                              <NumSort column="value" sort={numSort} onSort={changeNumSort} />
                               <ColFilter
                                 values={(rows || []).map((r) =>
                                   formatINR(
@@ -1377,6 +1497,10 @@ export default function Reports() {
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, value: v }))
                                 }
+                                column="value"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
                               />
                             </th>
                           </>
@@ -1390,6 +1514,10 @@ export default function Reports() {
                               onChange={(v) =>
                                 setCfTxn((f) => ({ ...f, project: v }))
                               }
+                              column="project"
+                              sortKind="text"
+                              sort={numSort}
+                              onSort={changeNumSort}
                             />
                           </th>
                         )}
@@ -1401,6 +1529,10 @@ export default function Reports() {
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, remarks: v }))
                             }
+                            column="remarks"
+                            sortKind="text"
+                            sort={numSort}
+                            onSort={changeNumSort}
                           />
                         </th>
                       </tr>
