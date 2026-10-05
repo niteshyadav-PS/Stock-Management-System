@@ -121,16 +121,6 @@ function ColFilter({
   const filterOn = Array.isArray(selected) && selected.length > 0;
   const sortOn = Boolean(column && sort?.key === column);
 
-  useEffect(() => {
-    const th = btnRef.current?.closest("th");
-    if (!th) return;
-    if (filterOn || sortOn) {
-      th.style.boxShadow = "inset 0 -3px 0 #1f5c52";
-    } else {
-      th.style.boxShadow = "";
-    }
-  }, [filterOn, sortOn]);
-
   const panel = (
     <div
       ref={panelRef}
