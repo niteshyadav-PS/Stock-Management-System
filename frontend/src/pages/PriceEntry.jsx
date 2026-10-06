@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
 import { getInward, updatePrice } from "../api/api";
 import { loadInPages } from "../api/paged";
-import { formatNum, exportXlsx } from "../utils/helpers";
+import { formatNum, exportXlsx, formatDateTime } from "../utils/helpers";
 // NOTE: adjust this import path if your AuthContext file lives elsewhere.
 import { useAuth } from "../context/AuthContext";
 import Pagination from "../components/Pagination";
@@ -1322,6 +1322,7 @@ export default function PriceEntry() {
                     />
                   </span>
                 </th>
+                <th>Timestamp</th>
                 <th></th>
               </tr>
             </thead>
@@ -1385,6 +1386,9 @@ export default function PriceEntry() {
                               : "text",
                         }}
                       />
+                    </td>
+                    <td className="nowrap" title="When this inward was saved">
+                      {formatDateTime(e.createdAt)}
                     </td>
                     <td>
                       {canEdit ? (

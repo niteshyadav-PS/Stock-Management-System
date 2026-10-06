@@ -108,6 +108,13 @@ export default function ColFilter({
     JSON.stringify(pending.slice().sort()) !==
     JSON.stringify(selected.slice().sort());
 
+  // A full selection shows every row, so it is not an applied filter.
+  const valueFilterOn =
+    Array.isArray(selected) &&
+    selected.length > 0 &&
+    (unique.length === 0 || selected.length < unique.length);
+  const highlighted = valueFilterOn || Boolean(column && sort?.key === column);
+
   const panel = (
     <div
       ref={panelRef}
@@ -385,18 +392,18 @@ export default function ColFilter({
         ref={btnRef}
         onClick={handleOpen}
         style={{
-          background: selected.length > 0 || sort?.key === column ? "var(--teal)" : "none",
+          background: highlighted ? "var(--teal)" : "transparent",
           border: "none",
           cursor: "pointer",
           padding: "2px 6px",
           borderRadius: 4,
           fontSize: 10,
-          color: selected.length > 0 || sort?.key === column ? "#fff" : "#8a8270",
+          color: highlighted ? "#fff" : "#b7b1a4",
           lineHeight: 1,
           flexShrink: 0,
         }}
         title={
-          selected.length > 0 ? `${selected.length} filter(s) active` : "Filter"
+          valueFilterOn ? `${selected.length} filter(s) active` : "Filter"
         }
       >
         ▼

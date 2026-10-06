@@ -49,6 +49,22 @@ export function formatDateDMY(dateStr) {
 // dd/mm/yyyy automatically (previously dd-mm-yyyy).
 export const toDDMMYYYY = formatDateDMY;
 
+/** Local date and time of one saved transaction. */
+export function formatDateTime(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const time = d.toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return `${dd}/${mm}/${yyyy} ${time}`;
+}
+
 // Loose header normaliser
 export function normHeader(h) {
   return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');

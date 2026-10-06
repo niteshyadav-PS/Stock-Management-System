@@ -19,6 +19,7 @@ import {
   parseExcelDate,
   exportXlsx,
   formatDateDMY,
+  formatDateTime,
 } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
@@ -1576,7 +1577,11 @@ export default function OutwardEntry() {
           </label>
           <button
             type="button"
-            className="btn btn-ghost btn-sm"
+            className={
+              searchText.trim() || fromDate || toDate || Object.values(cf).some((v) => v.length)
+                ? "btn btn-ghost btn-sm"
+                : "btn btn-sm"
+            }
             style={{
               height: "var(--input-h)",
               padding: "10px 14px",
@@ -1585,6 +1590,13 @@ export default function OutwardEntry() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              ...(searchText.trim() || fromDate || toDate || Object.values(cf).some((v) => v.length)
+                ? {}
+                : {
+                    background: "#fff",
+                    color: "var(--text-3)",
+                    border: "1.5px solid var(--line)",
+                  }),
             }}
             onClick={() => {
               setSearchText("");
@@ -1771,6 +1783,7 @@ export default function OutwardEntry() {
                   selected={cf.remarks}
                   onChange={(v) => setCf((f) => ({ ...f, remarks: v }))}
                 />
+                <th>Timestamp</th>
                 {canEditDelete && <th style={{ minWidth: 110 }}>Actions</th>}
               </tr>
             </thead>
@@ -1818,6 +1831,9 @@ export default function OutwardEntry() {
                       {hasReqty ? formatNum(remaining) : "—"}
                     </td>
                     <td>{e.remarks || "—"}</td>
+                    <td className="nowrap" title="When this outward was saved">
+                      {formatDateTime(e.createdAt)}
+                    </td>
                     {canEditDelete && (
                       <td>
                         <div style={{ display: "flex", gap: 6 }}>
