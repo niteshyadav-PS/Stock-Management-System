@@ -68,6 +68,32 @@ export function summaryToMaps(summary) {
   return { inMap, outMap, valueMap, pricedQtyMap };
 }
 
+/** Same rows Live Stock uses for average price and stock value. */
+export function stockRowsFromSummary(master, summary) {
+  const { inMap, outMap, valueMap, pricedQtyMap } = summaryToMaps(summary);
+  return (master || []).map((m) => {
+    const k = (m.name || "").trim().toLowerCase();
+    const inQty = inMap.get(k) || 0;
+    const outQty = outMap.get(k) || 0;
+    const balance = inQty - outQty;
+    const pricedQty = pricedQtyMap.get(k) || 0;
+    const avgPrice = pricedQty > 0 ? (valueMap.get(k) || 0) / pricedQty : 0;
+    const stockVal = avgPrice * Math.max(pricedQty - outQty, 0);
+    const minStock = parseFloat(m.minStock) || 0;
+    return {
+      ...m,
+      inQty,
+      outQty,
+      stock: balance,
+      balance,
+      minStock,
+      avgPrice,
+      totalVal: stockVal,
+      stockVal,
+    };
+  });
+}
+
 export function stockMapFromSummary(master, summary) {
   const { inMap, outMap } = summaryToMaps(summary);
   const stockMap = {};

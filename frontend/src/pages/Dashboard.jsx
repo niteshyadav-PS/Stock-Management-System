@@ -86,7 +86,7 @@ function materialRows(summary) {
         outQty,
         inValue: round2(inValue),
         avgPrice: round2(avgPrice),
-        stockValue: round2(avgPrice * Math.max(stock, 0)),
+        stockValue: round2(avgPrice * Math.max(pricedQty - outQty, 0)),
       };
     })
     .filter((row) => row.name);

@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { getMaster, getInward, getOutward, unwrapList } from "../api/api";
+import { getMaster, getInward, getOutward, getStockSummary, unwrapList } from "../api/api";
 import { loadInPages } from "../api/paged";
 import { useAuth } from "../context/AuthContext";
 import { formatNum, formatINR, exportXlsx, todayStr, toDDMMYYYY } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { sortByColumn } from "../components/NumSort";
+import { stockRowsFromSummary } from "../utils/stockMaps";
 
 // ── Excel-style dropdown filter — portal-based, with Apply button ────────────
 function ColFilter({
@@ -432,6 +433,7 @@ export default function Reports() {
   const canSeePrice = user?.role === "admin" || user?.role === "purchase" || user?.role === "accounts";
 
   const [master, setMaster] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [inward, setInward] = useState([]);
   const [outward, setOutward] = useState([]);
 
@@ -481,9 +483,10 @@ export default function Reports() {
   const load = useCallback(async () => {
     const gen = ++loadGen.current;
     try {
-      const m = await getMaster();
+      const [m, s] = await Promise.all([getMaster(), getStockSummary()]);
       if (gen !== loadGen.current) return;
       setMaster(unwrapList(m));
+      setSummary(s);
       setListNote("Loading report data…");
       let inDone = false;
       let outDone = false;
@@ -596,58 +599,69 @@ export default function Reports() {
     setCfBoth(emptyCfBoth);
     setCfTxn(emptyCfTxn);
     if (repType === "both") {
-      const filteredIn = filterEntries(inward);
-      const filteredOut = filterEntries(outward);
+      const hasEntryFilter = Boolean(
+        dateFrom || dateTo || category || vendor || material || project,
+      );
+      let result;
+      if (!hasEntryFilter) {
+        result = stockRowsFromSummary(master, summary).sort((a, b) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        );
+      } else {
+        const filteredIn = filterEntries(inward);
+        const filteredOut = filterEntries(outward);
+        const keyOf = (name) => String(name || "").trim().toLowerCase();
+        const inQtyMap = {};
+        const inValMap = {};
+        const inPricedQtyMap = {};
+        const outQtyMap = {};
+        const labelByKey = {};
+        filteredIn.forEach((e) => {
+          const key = keyOf(e.name);
+          if (!key) return;
+          if (!labelByKey[key]) labelByKey[key] = e.name;
+          const qty = parseFloat(e.qty) || 0;
+          const price = parseFloat(e.price);
+          inQtyMap[key] = (inQtyMap[key] || 0) + qty;
+          if (Number.isFinite(price) && price > 0) {
+            inValMap[key] = (inValMap[key] || 0) + qty * price;
+            inPricedQtyMap[key] = (inPricedQtyMap[key] || 0) + qty;
+          }
+        });
+        filteredOut.forEach((e) => {
+          const key = keyOf(e.name);
+          if (!key) return;
+          if (!labelByKey[key]) labelByKey[key] = e.name;
+          outQtyMap[key] = (outQtyMap[key] || 0) + (parseFloat(e.qty) || 0);
+        });
 
-      const inQtyMap = {},
-        inValMap = {},
-        inPricedQtyMap = {},
-        outQtyMap = {};
-      filteredIn.forEach((e) => {
-        const qty = parseFloat(e.qty) || 0;
-        const price = parseFloat(e.price);
-        inQtyMap[e.name] = (inQtyMap[e.name] || 0) + qty;
-        if (Number.isFinite(price) && price > 0) {
-          inValMap[e.name] = (inValMap[e.name] || 0) + qty * price;
-          inPricedQtyMap[e.name] = (inPricedQtyMap[e.name] || 0) + qty;
-        }
-      });
-      filteredOut.forEach((e) => {
-        outQtyMap[e.name] = (outQtyMap[e.name] || 0) + (parseFloat(e.qty) || 0);
-      });
-
-      const names = [
-        ...new Set([
-          ...filteredIn.map((e) => e.name),
-          ...filteredOut.map((e) => e.name),
-        ]),
-      ];
-
-      const result = names
-        .map((name) => {
-          const mat = master.find((m) => m.name === name) || {};
-          const inQty = inQtyMap[name] || 0;
-          const outQty = outQtyMap[name] || 0;
-          const balance = inQty - outQty;
-          const minStock = parseFloat(mat.minStock) || 0;
-          const pricedQty = inPricedQtyMap[name] || 0;
-          const avgPrice = pricedQty > 0 ? (inValMap[name] || 0) / pricedQty : 0;
-          const stockVal = avgPrice * Math.max(balance, 0);
-          return {
-            name,
-            type: mat.type || "",
-            category: mat.category || "",
-            code: mat.code || "",
-            uom: mat.uom || "",
-            inQty,
-            outQty,
-            balance,
-            minStock,
-            avgPrice,
-            stockVal,
-          };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
+        result = Object.keys({ ...inQtyMap, ...outQtyMap })
+          .map((key) => {
+            const mat =
+              master.find((m) => keyOf(m.name) === key) || {};
+            const inQty = inQtyMap[key] || 0;
+            const outQty = outQtyMap[key] || 0;
+            const balance = inQty - outQty;
+            const minStock = parseFloat(mat.minStock) || 0;
+            const pricedQty = inPricedQtyMap[key] || 0;
+            const avgPrice = pricedQty > 0 ? (inValMap[key] || 0) / pricedQty : 0;
+            const stockVal = avgPrice * Math.max(pricedQty - outQty, 0);
+            return {
+              name: mat.name || labelByKey[key] || key,
+              type: mat.type || "",
+              category: mat.category || "",
+              code: mat.code || "",
+              uom: mat.uom || "",
+              inQty,
+              outQty,
+              balance,
+              minStock,
+              avgPrice,
+              stockVal,
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }
 
       setRows(result);
       setRepMsg(
@@ -841,7 +855,7 @@ export default function Reports() {
 
   const totalStockVal =
     repType === "both"
-      ? filteredRows?.reduce((s, r) => s + r.stockVal, 0) || 0
+      ? rows?.reduce((s, r) => s + (r.stockVal || 0), 0) || 0
       : 0;
 
   const inwardVal =
@@ -1065,7 +1079,7 @@ export default function Reports() {
                   >
                     <div className="stat teal">
                       <div className="label">
-                        Total stock value (avg price × balance qty)
+                        Total stock value (avg price × remaining priced qty)
                       </div>
                       <div className="value">
                         {formatINR(Math.round(totalStockVal))}
