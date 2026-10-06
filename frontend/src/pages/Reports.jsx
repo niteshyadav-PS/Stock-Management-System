@@ -601,12 +601,16 @@ export default function Reports() {
 
       const inQtyMap = {},
         inValMap = {},
+        inPricedQtyMap = {},
         outQtyMap = {};
       filteredIn.forEach((e) => {
-        inQtyMap[e.name] = (inQtyMap[e.name] || 0) + (parseFloat(e.qty) || 0);
-        inValMap[e.name] =
-          (inValMap[e.name] || 0) +
-          (parseFloat(e.qty) || 0) * (parseFloat(e.price) || 0);
+        const qty = parseFloat(e.qty) || 0;
+        const price = parseFloat(e.price);
+        inQtyMap[e.name] = (inQtyMap[e.name] || 0) + qty;
+        if (Number.isFinite(price) && price > 0) {
+          inValMap[e.name] = (inValMap[e.name] || 0) + qty * price;
+          inPricedQtyMap[e.name] = (inPricedQtyMap[e.name] || 0) + qty;
+        }
       });
       filteredOut.forEach((e) => {
         outQtyMap[e.name] = (outQtyMap[e.name] || 0) + (parseFloat(e.qty) || 0);
@@ -626,7 +630,8 @@ export default function Reports() {
           const outQty = outQtyMap[name] || 0;
           const balance = inQty - outQty;
           const minStock = parseFloat(mat.minStock) || 0;
-          const avgPrice = inQty > 0 ? (inValMap[name] || 0) / inQty : 0;
+          const pricedQty = inPricedQtyMap[name] || 0;
+          const avgPrice = pricedQty > 0 ? (inValMap[name] || 0) / pricedQty : 0;
           const stockVal = avgPrice * Math.max(balance, 0);
           return {
             name,

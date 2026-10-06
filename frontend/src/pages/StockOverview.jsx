@@ -166,7 +166,7 @@ export default function StockOverview() {
 
   const { allRows, totalIn, totalOut, totalVal, lowCount, zeroCount, lowStockItems, zeroStockItems } =
     useMemo(() => {
-      const { inMap, outMap, valueMap } = summaryToMaps(summary);
+      const { inMap, outMap, valueMap, pricedQtyMap } = summaryToMaps(summary);
       const tIn = summary?.totals?.inQty || 0;
       const tOut = summary?.totals?.outQty || 0;
 
@@ -175,7 +175,8 @@ export default function StockOverview() {
         const inQty = inMap.get(k) || 0;
         const outQty = outMap.get(k) || 0;
         const stock = inQty - outQty;
-        const avgPrice = inQty > 0 ? (valueMap.get(k) || 0) / inQty : 0;
+        const pricedQty = pricedQtyMap.get(k) || 0;
+        const avgPrice = pricedQty > 0 ? (valueMap.get(k) || 0) / pricedQty : 0;
         const totalVal = avgPrice * Math.max(stock, 0);
         const minStock = parseFloat(m.minStock) || 0;
         return { ...m, inQty, outQty, stock, minStock, avgPrice, totalVal };

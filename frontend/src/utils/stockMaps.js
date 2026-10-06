@@ -50,14 +50,22 @@ export function summaryToMaps(summary) {
   const inMap = new Map();
   const outMap = new Map();
   const valueMap = new Map();
+  const pricedQtyMap = new Map();
   for (const row of summary?.items || []) {
     const k = row.key || (row.name || "").trim().toLowerCase();
     if (!k) continue;
     inMap.set(k, Number(row.inQty) || 0);
     outMap.set(k, Number(row.outQty) || 0);
     valueMap.set(k, Number(row.inValue) || 0);
+    const pricedQty =
+      row.pricedQty === undefined || row.pricedQty === null
+        ? Number(row.inValue) > 0
+          ? Number(row.inQty) || 0
+          : 0
+        : Number(row.pricedQty) || 0;
+    pricedQtyMap.set(k, pricedQty);
   }
-  return { inMap, outMap, valueMap };
+  return { inMap, outMap, valueMap, pricedQtyMap };
 }
 
 export function stockMapFromSummary(master, summary) {
@@ -75,7 +83,8 @@ export function summaryAsInwardRows(summary) {
   return (summary?.items || []).map((it) => ({
     name: it.name,
     qty: Number(it.inQty) || 0,
-    price: it.inQty > 0 ? (Number(it.inValue) || 0) / it.inQty : 0,
+    price:
+      Number(it.pricedQty) > 0 ? (Number(it.inValue) || 0) / Number(it.pricedQty) : 0,
   }));
 }
 
