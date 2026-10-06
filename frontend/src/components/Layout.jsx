@@ -96,6 +96,26 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    label: "Accounts",
+    icon: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <rect x="2" y="5" width="20" height="14" rx="2" />
+        <line x1="2" y1="10" x2="22" y2="10" />
+      </svg>
+    ),
+    items: [
+      { label: "Live Stock", path: "/stock", roles: ["accounts"] },
+      { label: "Reports", path: "/reports", roles: ["accounts"] },
+    ],
+  },
+  {
     label: "Reports",
     icon: (
       <svg
@@ -212,6 +232,10 @@ export default function Layout() {
       case "store":
       case "store_manager":
         navigate("/dashboard/store");
+        break;
+
+      case "accounts":
+        navigate("/stock");
         break;
 
       default:

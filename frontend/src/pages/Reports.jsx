@@ -429,7 +429,7 @@ function ColFilter({
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function Reports() {
   const { user } = useAuth();
-  const canSeePrice = user?.role === "admin" || user?.role === "purchase";
+  const canSeePrice = user?.role === "admin" || user?.role === "purchase" || user?.role === "accounts";
 
   const [master, setMaster] = useState([]);
   const [inward, setInward] = useState([]);

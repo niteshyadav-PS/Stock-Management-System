@@ -22,9 +22,9 @@ const ROLE_ACCESS = {
   inward: ["admin", "store", "store_manager"],
   outward: ["admin", "store", "store_manager"],
   price: ["admin", "purchase"],
-  stock: ["admin", "purchase", "store", "store_manager", "viewer"],
+  stock: ["admin", "purchase", "store", "store_manager", "viewer", "accounts"],
   users: ["admin"],
-  reports: ["admin", "purchase", "store", "store_manager", "viewer"],
+  reports: ["admin", "purchase", "store", "store_manager", "viewer", "accounts"],
   purchaseRequests: ["admin", "store", "store_manager", "viewer"],
   purchaseOrders: ["admin", "purchase"],
   poMatching: ["admin", "purchase", "store", "store_manager"],
@@ -43,6 +43,7 @@ function getDefaultPath(role) {
     case "store_manager":
       return "/dashboard/store";
 
+    case "accounts":
     case "viewer":
       return "/stock";
 

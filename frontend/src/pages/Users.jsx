@@ -13,6 +13,7 @@ const ROLE_COLORS = {
   store:         { bg: '#eef2ff', color: '#3730a3' },
   store_manager: { bg: '#f3e8ff', color: '#6b21a8' },
   purchase:      { bg: '#f8ede7', color: 'var(--rust-dark)' },
+  accounts:      { bg: '#e8f4ea', color: '#1b5e20' },
   viewer:        { bg: 'var(--paper-dim)', color: '#5a5444' },
 };
 
@@ -128,6 +129,7 @@ export default function Users() {
                 <option value="store">Store Team — Inward + Outward</option>
                 <option value="store_manager">Store Manager — Approve Requests</option>
                 <option value="purchase">Purchase Team</option>
+                <option value="accounts">Accounts — Live Stock and Reports</option>
                 <option value="viewer">Viewer — Read Only</option>
               </select>
             </div>

@@ -117,7 +117,7 @@ function ChartScroller({ minWidth, height, children }) {
 export default function StockOverview() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const canSeePrice = user?.role === "admin" || user?.role === "purchase";
+  const canSeePrice = user?.role === "admin" || user?.role === "purchase" || user?.role === "accounts";
 
   const [master, setMaster] = useState([]);
   const [summary, setSummary] = useState(null);

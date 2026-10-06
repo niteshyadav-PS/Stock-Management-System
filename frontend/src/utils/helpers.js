@@ -131,5 +131,6 @@ export const ROLE_LABELS = {
   store:         'Store Team',
   store_manager: 'Store Manager',
   purchase:      'Purchase Team',
+  accounts:      'Accounts',
   viewer:        'Viewer',
 };
