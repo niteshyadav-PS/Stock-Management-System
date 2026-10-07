@@ -84,6 +84,226 @@ const emptyManualRow = () => ({
 const RECEIVED_BY_OPTIONS = ["Rajendra Saroj","Raju Singh", "Krishna Vishwakarma"];
 const OTHER_VALUE = "__other__";
 
+const KNOWN_VENDORS = [
+  "G K Powder Coating",
+  "Darshan Extrusions Pvt Ltd",
+  "Global Aluminium Pvt Ltd",
+  "Hindalco Industries Limited",
+  "J M Industries",
+  "Maan Aluminium Ltd",
+  "Phoenix Alliance Private Limited",
+  "R Y Extrusion Private Limited",
+  "Vivant Solutions Private Limited",
+  "Hilti India Pvt Ltd",
+  "Airtech",
+  "Makvolt Power Private Limited",
+  "Mica Sales and Engineering",
+  "Poly Products",
+  "K Y Brush Industries",
+  "Mould Craft Engineers",
+  "Fixotec Pipe Supports Private Limited",
+  "G B Enterprises Pvt. Ltd.",
+  "Mep Integrated Solutions",
+  "Ramdev Steeltech Storage Innovations",
+  "Rise Dbs Private Limited",
+  "Adcs Technologies Private Limited",
+  "Big B Appliances",
+  "Esoftsol Infocom Private Limited",
+  "Kloseven Royale",
+  "Raju Electric Works",
+  "Saec Cooling Solutions Private Limited",
+  "Transmonk India Private Limited",
+  "Osaka Rubber Pvt.Ltd.",
+  "Akash Poly Profile",
+  "Jika Epc Services Pvt Ltd",
+  "A N G Cement Product",
+  "Seaon Adhesive Tapes Private Limited",
+  "Shiv Sagar Furniture",
+  "Anita Gas Service",
+  "Adinath Industrial Input",
+  "Arihant Electricals",
+  "Arrow International",
+  "Ashish International",
+  "Bhartee Industries",
+  "Devesh Enterprises",
+  "Divine Industries",
+  "Fischer Building Materials India Private Limited",
+  "Industrial House",
+  "Mahabali Enterprises",
+  "Nilesh Enterprise",
+  "Pass Enterprise",
+  "Rahul Electricals & Hardware",
+  "Sagar Electrical",
+  "Shiv Om Fastners",
+  "Shree Krishna Enterprises",
+  "Spanco Electronics",
+  "Classic Interiors",
+  "Suresh Indu Laser Pvt Ltd",
+  "Airtech Engineers",
+  "Atharva Aerosol",
+  "Jai Industries",
+  "Mahendra Machine Tools",
+  "Mengi Engineering Co",
+  "Techno Tools",
+  "Sneha Industries",
+  "Amey Industries",
+  "Asmee Engineering Industries Llp",
+  "Cmd Fabricators",
+  "Moha",
+  "Prathamesh Ispat Engineers Pvt Ltd",
+  "Sandeep Fabricators",
+  "C Tech Electronics",
+  "Quest Enterprises P Ltd",
+  "Zenco Metal Finishers & Zentech Labels",
+  "Choice Enterprises",
+  "Dharma Steel Corporation",
+  "Parth Enterprises",
+  "Aakruti Wool Tex",
+  "Godi Seal Kamgar Sahakari Sanstha Ltd.",
+  "Os India Enterprises",
+  "Pride Packaging",
+  "Ranchod Enterprises",
+  "Ronak Packaging",
+  "Sahil Packaging",
+  "Sp Packaging",
+  "Zenpack Innovations",
+  "Arham Engineering & Industrial Corporation",
+  "Labdhi Enterprise",
+  "Perfect Agro Plast",
+  "Shakti Ceramics",
+  "Maharashtra Plywood",
+  "Moksh Plywood and Hardware",
+  "Bharti Plast",
+  "Palram India Private Limited",
+  "Anupam Stationery Superstore Pvt Ltd",
+  "Choice Digital",
+  "Sagar Stationery & Xerox",
+  "Sneh Graphics",
+  "AVETTA INDIA PRIVATE LIMITED",
+  "Sony Plastics",
+  "Aqua Mech",
+  "Mk Engg Works",
+  "Reflectosafe",
+  "Gra Associate",
+  "Schach Engineers Private Limited",
+  "Western Lifters Private Limited",
+  "Banaraswala Wire Mesh Private Limited",
+  "Laktas Wire Mesh Pvt Ltd",
+  "Nav Durga Electro Platers",
+  "R N Electroplating",
+  "Threevee Engineers",
+  "Amazon",
+  "Atmabharti Industries Private Limited",
+  "BENGAL TOOLS & SAFETY",
+  "BLINDS HUB",
+  "DATTA RUBBER INDUSTRIES",
+  "Durgi Steel",
+  "Elisha Equipments Private Limited",
+  "Excel Traders",
+  "FINE GLASS SOLUTIONS",
+  "Gemini Power Hydraulics Private Limited",
+  "Global Pipe Fixing & Supportz",
+  "Hardin Aluminium Llp",
+  "Harshal Enterprises",
+  "Impact Wood Packers",
+  "Innotech Support Solutions Private Limited",
+  "Innova Industries",
+  "JETWASH ENTERPRISES",
+  "Jewel Metallochem Laboratory Pvt Ltd",
+  "JuYo Preneur",
+  "Kapoor Enterprises",
+  "Mahendra Tools & Tackles",
+  "M/s. Excellent Chairs",
+  "Ms Janak Enterprise",
+  "M/s Mauli Machines",
+  "Mupro India Private Limited",
+  "National Aluminium & Hardware",
+  "NATIONAL ENTERPRISES",
+  "Navkar Decor",
+  "New Catering Hub",
+  "Nturm Engineers Limited",
+  "Perfect Water Care",
+  "Pertici Industry India Private Limited",
+  "Pks Infocom Private Limited",
+  "Prince Marketing",
+  "Print Venture",
+  "Raj Interior",
+  "R and R Awards",
+  "Rapid Industries",
+  "Reach International",
+  "RELIABLE INTERNATIONAL",
+  "Reliance Retail Limited",
+  "RICHARD SERVICE",
+  "Sahajanand Sales Corporation",
+  "Sheetal Wireless Technologies Pvt Ltd",
+  "Shiv Enterprises",
+  "Shiv Mobile",
+  "Vijayalaxmi Hardware",
+  "Vijay Hardware Stores",
+  "Viva Composite Panel Pvt Ltd",
+  "Warpp Engineers Pvt Ltd",
+  "Weldwins Industries",
+  "Y Equipment Services Private Limited",
+];
+
+const JUNK_VENDORS = new Set([
+  "demo",
+  "test",
+  "na",
+  "pass",
+  "sdfgh",
+  "gyuu",
+  "ikmkl",
+  "opaeth",
+  "osaka",
+  "pqss",
+  "qtwywyw",
+]);
+
+function VendorNameInput({ value, onChange, names, required, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const query = String(value || "").trim().toLowerCase();
+  const matches = (names || []).filter((name) =>
+    query ? name.toLowerCase().includes(query) : true,
+  );
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        required={required}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      {open && (
+        <div className="po-dropdown">
+          {matches.length === 0 ? (
+            <div className="po-dropdown-empty">
+              No matching vendor. The name you type will be saved.
+            </div>
+          ) : (
+            matches.map((name) => (
+              <div
+                key={name}
+                className="po-dropdown-item"
+                onMouseDown={() => {
+                  onChange(name);
+                  setOpen(false);
+                }}
+              >
+                {name}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function getSelectValue(value, options) {
   if (!value || value === OTHER_VALUE) return "Other";
   return options.includes(value) ? value : "Other";
@@ -152,7 +372,7 @@ function matchesSearchText(entry, query) {
 }
 
 /* ── Inline Edit Modal ───────────────────────────────────────────────── */
-function EditModal({ entry, master, canSeePrice, onSave, onClose }) {
+function EditModal({ entry, master, canSeePrice, vendorNames, onSave, onClose }) {
   const [form, setForm] = useState({
     date: entry.date || "",
     invdate: entry.invdate || "",
@@ -388,12 +608,11 @@ function EditModal({ entry, master, canSeePrice, onSave, onClose }) {
               </div>
               <div className="field full">
                 <label>Vendor name</label>
-                <input
+                <VendorNameInput
                   value={form.vendor}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, vendor: e.target.value }))
-                  }
-                  placeholder="e.g. ABC Vendors Pvt. Ltd."
+                  names={vendorNames}
+                  onChange={(vendor) => setForm((f) => ({ ...f, vendor }))}
+                  placeholder="Type to search vendor name"
                 />
               </div>
               <div className="field full">
@@ -762,6 +981,23 @@ export default function InwardEntry() {
     useClientPagination(filteredEntries, 25);
 
   // ── PO search/filter for the searchable PO Number field ───────────────
+  const vendorNames = useMemo(() => {
+    const set = new Set(KNOWN_VENDORS);
+    for (const entry of entries) {
+      const name = String(entry.vendor || "").trim();
+      if (name && name !== "—" && !JUNK_VENDORS.has(name.toLowerCase())) {
+        set.add(name);
+      }
+    }
+    for (const po of poList) {
+      const name = String(po.vendorName || "").trim();
+      if (name && !JUNK_VENDORS.has(name.toLowerCase())) set.add(name);
+    }
+    return [...set].sort((a, b) =>
+      a.localeCompare(b, "en", { sensitivity: "base" }),
+    );
+  }, [entries, poList]);
+
   const filteredPoList = useMemo(() => {
     const q = poSearch.trim().toLowerCase();
     if (!q) return poList;
@@ -1511,6 +1747,7 @@ export default function InwardEntry() {
           entry={editEntry}
           master={master}
           canSeePrice={canSeePrice}
+          vendorNames={vendorNames}
           onSave={handleEditSave}
           onClose={() => setEditEntry(null)}
         />
@@ -2100,13 +2337,12 @@ export default function InwardEntry() {
               <label>
                 Vendor name <span style={{ color: "var(--red)" }}>*</span>
               </label>
-              <input
+              <VendorNameInput
                 required
                 value={form.vendor}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, vendor: e.target.value }))
-                }
-                placeholder="Auto-filled from PO, or enter manually"
+                names={vendorNames}
+                onChange={(vendor) => setForm((f) => ({ ...f, vendor }))}
+                placeholder="Type to search, or enter a new vendor"
               />
             </div>
           </div>
