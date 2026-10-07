@@ -246,19 +246,9 @@ const KNOWN_VENDORS = [
   "Y Equipment Services Private Limited",
 ];
 
-const JUNK_VENDORS = new Set([
-  "demo",
-  "test",
-  "na",
-  "pass",
-  "sdfgh",
-  "gyuu",
-  "ikmkl",
-  "opaeth",
-  "osaka",
-  "pqss",
-  "qtwywyw",
-]);
+const VENDOR_DROPDOWN = [...KNOWN_VENDORS].sort((a, b) =>
+  a.localeCompare(b, "en", { sensitivity: "base" }),
+);
 
 function VendorNameInput({ value, onChange, names, required, placeholder }) {
   const [open, setOpen] = useState(false);
@@ -1022,22 +1012,7 @@ export default function InwardEntry() {
     useClientPagination(filteredEntries, 25);
 
   // ── PO search/filter for the searchable PO Number field ───────────────
-  const vendorNames = useMemo(() => {
-    const set = new Set(KNOWN_VENDORS);
-    for (const entry of entries) {
-      const name = String(entry.vendor || "").trim();
-      if (name && name !== "—" && !JUNK_VENDORS.has(name.toLowerCase())) {
-        set.add(name);
-      }
-    }
-    for (const po of poList) {
-      const name = String(po.vendorName || "").trim();
-      if (name && !JUNK_VENDORS.has(name.toLowerCase())) set.add(name);
-    }
-    return [...set].sort((a, b) =>
-      a.localeCompare(b, "en", { sensitivity: "base" }),
-    );
-  }, [entries, poList]);
+  const vendorNames = VENDOR_DROPDOWN;
 
   const filteredPoList = useMemo(() => {
     const q = poSearch.trim().toLowerCase();
