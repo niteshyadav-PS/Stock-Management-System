@@ -313,6 +313,16 @@ function VendorNameInput({ value, onChange, names, required, placeholder }) {
       />
       {open && (
         <div className="po-dropdown">
+          <div
+            className="po-dropdown-item po-dropdown-manual"
+            onMouseDown={() => {
+              onChange("");
+              setCustom(true);
+              setOpen(false);
+            }}
+          >
+            ✎ Other — type your own
+          </div>
           {matches.length === 0 ? (
             <div className="po-dropdown-empty">No matching vendor</div>
           ) : (
@@ -329,16 +339,6 @@ function VendorNameInput({ value, onChange, names, required, placeholder }) {
               </div>
             ))
           )}
-          <div
-            className="po-dropdown-item po-dropdown-manual"
-            onMouseDown={() => {
-              onChange("");
-              setCustom(true);
-              setOpen(false);
-            }}
-          >
-            ✎ Other — type your own
-          </div>
         </div>
       )}
     </div>
