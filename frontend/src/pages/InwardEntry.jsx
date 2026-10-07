@@ -262,28 +262,59 @@ const JUNK_VENDORS = new Set([
 
 function VendorNameInput({ value, onChange, names, required, placeholder }) {
   const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(
+    () => Boolean(String(value || "").trim()) && !(names || []).includes(value),
+  );
   const query = String(value || "").trim().toLowerCase();
   const matches = (names || []).filter((name) =>
     query ? name.toLowerCase().includes(query) : true,
   );
+
+  if (custom) {
+    return (
+      <div style={{ display: "flex", gap: 6 }}>
+        <input
+          required={required}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Enter vendor name"
+          autoFocus
+          autoComplete="off"
+          style={{ flex: 1 }}
+        />
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          style={{ whiteSpace: "nowrap" }}
+          onClick={() => {
+            setCustom(false);
+            onChange("");
+          }}
+        >
+          ← Back
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: "relative" }}>
       <input
         required={required}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder={placeholder}
+        placeholder={placeholder || "Type to search vendor name"}
         autoComplete="off"
       />
       {open && (
         <div className="po-dropdown">
           {matches.length === 0 ? (
-            <div className="po-dropdown-empty">
-              No matching vendor. The name you type will be saved.
-            </div>
+            <div className="po-dropdown-empty">No matching vendor</div>
           ) : (
             matches.map((name) => (
               <div
@@ -298,6 +329,16 @@ function VendorNameInput({ value, onChange, names, required, placeholder }) {
               </div>
             ))
           )}
+          <div
+            className="po-dropdown-item po-dropdown-manual"
+            onMouseDown={() => {
+              onChange("");
+              setCustom(true);
+              setOpen(false);
+            }}
+          >
+            ✎ Other — type your own
+          </div>
         </div>
       )}
     </div>
