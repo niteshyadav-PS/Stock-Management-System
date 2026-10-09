@@ -43,6 +43,27 @@ function resolveProject(...parts) {
   return "";
 }
 
+/** Expected delivery date entered on the purchase request line. */
+function lineExpectedDate(pr, item) {
+  if (item?.expectedDeliveryDate) return item.expectedDeliveryDate;
+  if (!pr) return "";
+  const name = String(item?.name || "").trim().toLowerCase();
+  const project = String(item?.projectName || pr.projectName || "")
+    .trim()
+    .toLowerCase();
+  const lines = pr.items || [];
+  const match =
+    lines.find((it) => {
+      const sameName = String(it.name || "").trim().toLowerCase() === name;
+      const sameProject =
+        String(it.projectName || pr.projectName || "").trim().toLowerCase() ===
+        project;
+      return sameName && sameProject;
+    }) ||
+    lines.find((it) => String(it.name || "").trim().toLowerCase() === name);
+  return match?.expectedDeliveryDate || "";
+}
+
 function buildAlreadyOrderedMap(existingPOs) {
   const alreadyOrdered = {};
   for (const po of existingPOs || []) {
@@ -505,6 +526,7 @@ export default function PurchaseOrders() {
           uom: it.uom || "",
           remarks: it.remarks || "",
           projectName: resolveProject(it.projectName, pr.projectName),
+          expectedDeliveryDate: it.expectedDeliveryDate || "",
           orderedQty: String(remaining),
           price: it.price ? String(it.price) : "",
           maxQty: remaining,
@@ -657,6 +679,7 @@ export default function PurchaseOrders() {
         "Material",
         "Code",
         "UOM",
+        "Expected delivery",
         "PR Qty",
         "Already Ordered",
         "Remaining",
@@ -691,6 +714,7 @@ export default function PurchaseOrders() {
             it.name,
             it.code || "",
             it.uom || "",
+            it.expectedDeliveryDate ? toDDMMYYYY(it.expectedDeliveryDate) : "",
             it.qty,
             it.already > 0 ? it.already : 0,
             it.remaining,
@@ -1028,6 +1052,7 @@ export default function PurchaseOrders() {
                             "Code",
                             "Project",
                             "UOM",
+                            "Expected delivery",
                             "PR Qty",
                             "Already Ordered",
                             "Remaining",
@@ -1040,7 +1065,7 @@ export default function PurchaseOrders() {
                               key={i}
                               style={{
                                 padding: "8px 10px",
-                                textAlign: i >= 4 && i <= 8 ? "right" : "left",
+                                textAlign: i >= 5 && i <= 9 ? "right" : "left",
                                 fontSize: 11,
                                 fontWeight: 700,
                                 letterSpacing: "0.04em",
@@ -1090,6 +1115,13 @@ export default function PurchaseOrders() {
                             </td>
                             <td style={{ padding: "7px 10px" }}>
                               {it.uom || "—"}
+                            </td>
+                            <td className="nowrap" style={{ padding: "7px 10px" }}>
+                              {it.expectedDeliveryDate ? (
+                                toDDMMYYYY(it.expectedDeliveryDate)
+                              ) : (
+                                <span style={{ color: "var(--text-3)" }}>—</span>
+                              )}
                             </td>
                             <td
                               style={{
@@ -1362,6 +1394,7 @@ export default function PurchaseOrders() {
                                       <th style={thStyle}>Code</th>
                                       <th style={thStyle}>Project</th>
                                       <th style={thStyle}>UOM</th>
+                                      <th style={thStyle}>Expected delivery</th>
                                       <th
                                         style={{
                                           ...thStyle,
@@ -1444,6 +1477,15 @@ export default function PurchaseOrders() {
                                           </td>
                                           <td style={tdStyle}>
                                             {it.uom || "—"}
+                                          </td>
+                                          <td className="nowrap" style={tdStyle}>
+                                            {it.expectedDeliveryDate ? (
+                                              toDDMMYYYY(it.expectedDeliveryDate)
+                                            ) : (
+                                              <span style={{ color: "var(--text-3)" }}>
+                                                —
+                                              </span>
+                                            )}
                                           </td>
                                           <td
                                             style={{
@@ -1766,6 +1808,7 @@ export default function PurchaseOrders() {
                                       <th style={thStyle}>Category</th>
                                       <th style={thStyle}>Project</th>
                                       <th style={thStyle}>UOM</th>
+                                      <th style={thStyle}>Expected delivery</th>
                                       <th
                                         style={{
                                           ...thStyle,
@@ -1823,6 +1866,15 @@ export default function PurchaseOrders() {
                                             "—"}
                                         </td>
                                         <td style={tdStyle}>{it.uom || "—"}</td>
+                                        <td className="nowrap" style={tdStyle}>
+                                          {lineExpectedDate(pr, it) ? (
+                                            toDDMMYYYY(lineExpectedDate(pr, it))
+                                          ) : (
+                                            <span style={{ color: "var(--text-3)" }}>
+                                              —
+                                            </span>
+                                          )}
+                                        </td>
                                         <td
                                           style={{
                                             ...tdStyle,
@@ -2132,6 +2184,7 @@ export default function PurchaseOrders() {
                         <th>Material</th>
                         <th>Code</th>
                         <th>Project</th>
+                        <th>Expected delivery</th>
                         <th className="num">Ordered Qty</th>
                         <th className="num">Unit Price</th>
                         <th>Remarks</th>
@@ -2159,6 +2212,15 @@ export default function PurchaseOrders() {
                               disabled={editLoading}
                               style={{ width: 130 }}
                             />
+                          </td>
+                          <td className="nowrap">
+                            {lineExpectedDate(prMap[editingPO.prNumber], item) ? (
+                              toDDMMYYYY(
+                                lineExpectedDate(prMap[editingPO.prNumber], item),
+                              )
+                            ) : (
+                              <span style={{ color: "var(--text-3)" }}>—</span>
+                            )}
                           </td>
                           <td>
                             <input
