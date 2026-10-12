@@ -7,7 +7,7 @@ import { formatNum, formatINR, exportXlsx, todayStr, toDDMMYYYY } from "../utils
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { sortByColumn } from "../components/NumSort";
-import { stockRowsFromSummary } from "../utils/stockMaps";
+import { stockRowsFromSummary, summaryToMaps } from "../utils/stockMaps";
 
 // ── Excel-style dropdown filter — portal-based, with Apply button ────────────
 function ColFilter({
@@ -473,6 +473,8 @@ export default function Reports() {
     vendor: [],
     price: [],
     value: [],
+    avgPrice: [],
+    evaluation: [],
     project: [],
     remarks: [],
   });
@@ -554,6 +556,26 @@ export default function Reports() {
     ...new Set(outward.map((e) => e.project).filter(Boolean)),
   ].sort();
 
+  // Weighted average unit price per material from inward receipts
+  // (inward amount ÷ priced inward qty), same figure as Live Stock.
+  const inwardAvgByName = useMemo(() => {
+    const { valueMap, pricedQtyMap } = summaryToMaps(summary);
+    const avg = new Map();
+    for (const [key, pricedQty] of pricedQtyMap) {
+      avg.set(key, pricedQty > 0 ? (valueMap.get(key) || 0) / pricedQty : 0);
+    }
+    return avg;
+  }, [summary]);
+
+  function avgPriceFor(name) {
+    return (
+      inwardAvgByName.get(String(name || "").trim().toLowerCase()) || 0
+    );
+  }
+  function evaluationFor(row) {
+    return (parseFloat(row.qty) || 0) * avgPriceFor(row.name);
+  }
+
   const emptyCfBoth = {
     name: [],
     type: [],
@@ -579,6 +601,8 @@ export default function Reports() {
     vendor: [],
     price: [],
     value: [],
+    avgPrice: [],
+    evaluation: [],
     project: [],
     remarks: [],
   };
@@ -730,6 +754,9 @@ export default function Reports() {
         "Qty",
       ];
       if (repType === "outward") headers.push("Required Qty", "Remaining Qty");
+      if (repType === "outward" && canSeePrice) {
+        headers.push("Avg Price", "Evaluation");
+      }
       if (repType !== "outward") headers.push("Vendor");
       if (repType !== "outward" && canSeePrice) headers.push("Price", "Value");
       if (repType !== "inward") headers.push("Project");
@@ -749,6 +776,7 @@ export default function Reports() {
             hasReqty(r) ? parseFloat(r.reqty) : "",
             hasReqty(r) ? remainingQty(r) : "",
           );
+          if (canSeePrice) row.push(avgPriceFor(r.name), evaluationFor(r));
         }
         if (repType !== "outward") row.push(r.vendor || "");
         if (repType !== "outward" && canSeePrice) {
@@ -813,11 +841,15 @@ export default function Reports() {
           cfTxn.price.includes(String(formatINR(r.price)))) &&
         (!cfTxn.value.length ||
           cfTxn.value.includes(String(formatINR(value)))) &&
+        (!cfTxn.avgPrice.length ||
+          cfTxn.avgPrice.includes(String(formatINR(avgPriceFor(r.name))))) &&
+        (!cfTxn.evaluation.length ||
+          cfTxn.evaluation.includes(String(formatINR(evaluationFor(r))))) &&
         (!cfTxn.project.length || cfTxn.project.includes(r.project || "—")) &&
         (!cfTxn.remarks.length || cfTxn.remarks.includes(r.remarks || "—"))
       );
     }
-  }), [rows, repType, cfBoth, cfTxn]);
+  }), [rows, repType, cfBoth, cfTxn, inwardAvgByName]);
 
   const sortedRows = useMemo(
     () =>
@@ -829,9 +861,11 @@ export default function Reports() {
         if (key === "value") {
           return (parseFloat(row.qty) || 0) * (parseFloat(row.price) || 0);
         }
+        if (key === "avgPrice") return avgPriceFor(row.name);
+        if (key === "evaluation") return evaluationFor(row);
         return row[key];
       }),
-    [filteredRows, numSort],
+    [filteredRows, numSort, inwardAvgByName],
   );
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
@@ -864,6 +898,11 @@ export default function Reports() {
           (s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.price) || 0),
           0,
         ) || 0
+      : 0;
+
+  const outwardEval =
+    repType === "outward"
+      ? filteredRows?.reduce((s, r) => s + evaluationFor(r), 0) || 0
       : 0;
 
   const uniqueMats =
@@ -1108,6 +1147,14 @@ export default function Reports() {
                   <div className="stat rust">
                     <div className="label">Total outward qty</div>
                     <div className="value">{formatNum(totalOut)}</div>
+                  </div>
+                )}
+                {canSeePrice && repType === "outward" && (
+                  <div className="stat rust">
+                    <div className="label">
+                      Total evaluation (outward qty × inward avg price)
+                    </div>
+                    <div className="value">{formatINR(outwardEval)}</div>
                   </div>
                 )}
                 {canSeePrice && repType === "inward" && (
@@ -1480,6 +1527,42 @@ export default function Reports() {
                             </th>
                           </>
                         )}
+                        {repType === "outward" && canSeePrice && (
+                          <>
+                            <th className="num">
+                              Avg price{" "}
+                              <ColFilter
+                                values={(rows || []).map((r) =>
+                                  formatINR(avgPriceFor(r.name)),
+                                )}
+                                selected={cfTxn.avgPrice}
+                                onChange={(v) =>
+                                  setCfTxn((f) => ({ ...f, avgPrice: v }))
+                                }
+                                column="avgPrice"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
+                              />
+                            </th>
+                            <th className="num">
+                              Evaluation{" "}
+                              <ColFilter
+                                values={(rows || []).map((r) =>
+                                  formatINR(evaluationFor(r)),
+                                )}
+                                selected={cfTxn.evaluation}
+                                onChange={(v) =>
+                                  setCfTxn((f) => ({ ...f, evaluation: v }))
+                                }
+                                column="evaluation"
+                                sortKind="number"
+                                sort={numSort}
+                                onSort={changeNumSort}
+                              />
+                            </th>
+                          </>
+                        )}
                         {repType !== "outward" && (
                           <th>
                             Vendor{" "}
@@ -1598,6 +1681,16 @@ export default function Reports() {
                                 ) : (
                                   "—"
                                 )}
+                              </td>
+                            </>
+                          )}
+                          {repType === "outward" && canSeePrice && (
+                            <>
+                              <td className="num">
+                                {formatINR(avgPriceFor(r.name))}
+                              </td>
+                              <td className="num">
+                                {formatINR(evaluationFor(r))}
                               </td>
                             </>
                           )}
