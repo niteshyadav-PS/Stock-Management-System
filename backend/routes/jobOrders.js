@@ -1,4 +1,5 @@
 const router = require("express").Router();
+const mongoose = require("mongoose");
 const JobOrder = require("../models/JobOrder");
 const { authMiddleware, requireRole } = require("../middleware/auth");
 const { parsePagination, paginateQuery } = require("../utils/paginate");
@@ -31,6 +32,36 @@ function calcArea(perimeter, length) {
   if (perimeter == null || length == null) return null;
   if (!perimeter || !length) return null;
   return (perimeter * length) / AREA_DIVISOR;
+}
+
+// Factory is stored as-is. Site must include a typed site name.
+function resolveReceiveLocation(entry) {
+  const loc = String(entry?.location || "").trim();
+  if (!loc) return { error: "Location is required" };
+  if (loc === "Site") {
+    const siteName = String(entry?.siteName || "").trim();
+    if (!siteName) return { error: "Site name is compulsory" };
+    return { value: `Site — ${siteName}` };
+  }
+  return { value: loc };
+}
+
+// yyyy-mm-dd only. Rejects empty and impossible dates (e.g. 2026-02-31).
+function parseCalendarDate(value) {
+  const s = String(value || "").trim().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return "";
+  const y = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const dt = new Date(Date.UTC(y, month - 1, day));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== month - 1 ||
+    dt.getUTCDate() !== day
+  )
+    return "";
+  return s;
 }
 
 // ── GET /api/job-orders ───────────────────────────────────────────────────────
@@ -357,7 +388,12 @@ router.patch(
   requireRole(...ALLOWED_ROLES),
   async (req, res) => {
     try {
-      const { items, receivedBy, challanNo, note } = req.body;
+      const { items, receivedBy, challanNo, note, receivedDate } = req.body;
+      const receiveDay = parseCalendarDate(receivedDate);
+      if (!receiveDay)
+        return res
+          .status(400)
+          .json({ error: "Receive date is compulsory." });
 
       const order = await JobOrder.findById(req.params.id);
       if (!order)
@@ -375,6 +411,9 @@ router.patch(
 
       const receivedLines = [];
       let anyReceived = false;
+      const lotId = new mongoose.Types.ObjectId().toString();
+      const savedAt = new Date();
+      const lotChallan = challanNo ? String(challanNo).trim() : "";
 
       for (let i = 0; i < order.items.length; i++) {
         const it = order.items[i];
@@ -389,22 +428,26 @@ router.patch(
             .json({
               error: `"${it.description}": can't receive ${receiving}, only ${remaining} pending.`,
             });
-        if (!entry.location || !String(entry.location).trim())
+        const location = resolveReceiveLocation(entry);
+        if (location.error)
           return res
             .status(400)
-            .json({ error: `Location is required for "${it.description}".` });
+            .json({ error: `${location.error} ("${it.description}").` });
 
         it.receipts.push({
           qty: receiving,
-          location: entry.location,
+          location: location.value,
           receivedBy: receivedBy || req.user.name || req.user.username,
           note: note || "",
-          at: new Date(),
+          receivedDate: receiveDay,
+          lotId,
+          challanNo: lotChallan,
+          at: savedAt,
         });
         it.receivedQty = Math.min(num(it.qty), num(it.receivedQty) + receiving);
         anyReceived = true;
         receivedLines.push(
-          `${it.description}: ${receiving} ${it.unit} @ ${entry.location}`,
+          `${it.description}: ${receiving} ${it.unit} @ ${location.value}`,
         );
       }
 
@@ -441,6 +484,7 @@ router.patch(
         by: receivedBy || req.user.name || req.user.username,
         note:
           receivedLines.join("; ") +
+          ` — Receive date: ${receiveDay.split("-").reverse().join("/")}` +
           (challanNo ? ` — Challan No: ${challanNo}` : "") +
           (note ? ` — ${note}` : ""),
         at: new Date(),

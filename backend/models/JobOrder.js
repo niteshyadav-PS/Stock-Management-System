@@ -1,11 +1,18 @@
 const mongoose = require('mongoose');
 
 const receiptSchema = new mongoose.Schema({
-  qty:        { type: Number, required: true, min: 0.0001 },
-  location:   { type: String, required: true },
-  receivedBy: { type: String, default: '' },
-  note:       { type: String, default: '' },
-  at:         { type: Date, default: Date.now },
+  qty:          { type: Number, required: true, min: 0.0001 },
+  location:     { type: String, required: true },
+  receivedBy:   { type: String, default: '' },
+  note:         { type: String, default: '' },
+  // Calendar day the goods actually arrived (yyyy-mm-dd). Separate from `at`,
+  // which is when this receipt was saved. Each partial lot keeps its own date.
+  receivedDate: { type: String, default: '' },
+  // One id per confirm-received action. Every item in that lot shares it,
+  // so each partial receive prints as its own receiving receipt.
+  lotId:        { type: String, default: '' },
+  challanNo:    { type: String, default: '' },
+  at:           { type: Date, default: Date.now },
 }, { _id: false });
 
 const joItemSchema = new mongoose.Schema({

@@ -649,6 +649,62 @@ function formatDate(d) {
   return `${day}/${m}/${y}`;
 }
 
+// Date the goods arrived for one receipt lot. Newer receipts store
+// receivedDate; older ones only have the save timestamp.
+function receiptReceivedDate(receipt) {
+  if (receipt?.receivedDate) return String(receipt.receivedDate).slice(0, 10);
+  if (receipt?.at) return String(receipt.at).slice(0, 10);
+  return "";
+}
+
+function receiptWhereLabel(receipt) {
+  return `${receipt.qty} @ ${receipt.location}`;
+}
+
+// One receiving receipt per confirm-received action. Newer lots share a
+// lotId. Older lots are grouped by the moment they were saved.
+function receiveLots(order) {
+  const buckets = new Map();
+  (order?.items || []).forEach((item, itemIndex) => {
+    (item.receipts || []).forEach((receipt) => {
+      const atMs = receipt?.at ? new Date(receipt.at).getTime() : 0;
+      const key = receipt?.lotId
+        ? `id:${receipt.lotId}`
+        : atMs
+          ? `legacy:${Math.floor(atMs / 15000)}`
+          : `legacy-date:${receiptReceivedDate(receipt)}|${receipt.receivedBy || ""}`;
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          id: key,
+          receivedDate: receiptReceivedDate(receipt),
+          challanNo: receipt.challanNo || "",
+          receivedBy: receipt.receivedBy || "",
+          at: Number.isFinite(atMs) ? atMs : 0,
+          lines: [],
+        });
+      }
+      const bucket = buckets.get(key);
+      if (!bucket.challanNo && receipt.challanNo) bucket.challanNo = receipt.challanNo;
+      bucket.lines.push({ item, itemIndex, receipt });
+    });
+  });
+  const lots = [...buckets.values()].sort(
+    (a, b) => a.at - b.at || String(a.id).localeCompare(String(b.id)),
+  );
+  const receivedSoFar = new Map();
+  lots.forEach((lot, index) => {
+    lot.index = index + 1;
+    lot.total = lots.length;
+    lot.lines.forEach((line) => {
+      const prev = receivedSoFar.get(line.itemIndex) || 0;
+      const next = prev + num(line.receipt.qty);
+      receivedSoFar.set(line.itemIndex, next);
+      line.pending = Math.max(0, num(line.item.qty) - next);
+    });
+  });
+  return lots;
+}
+
 function orderDispatchedQty(order) {
   return (order.items || []).reduce((sum, it) => sum + num(it.qty), 0);
 }
@@ -726,7 +782,7 @@ function setPrintPageSize(orientation) {
     styleEl.id = id;
     document.head.appendChild(styleEl);
   }
-  const margin = orientation === "landscape" ? "12mm" : "6mm";
+  const margin = orientation === "landscape" ? "8mm" : "6mm";
   styleEl.textContent = `@page { size: A4 ${orientation}; margin: ${margin}; }`;
 }
 
@@ -1421,6 +1477,7 @@ const PRINT_STYLE = `
 // Orientation set dynamically by setPrintPageSize('landscape') — see note above.
 const ITEMS_PRINT_STYLE = `
   @media print {
+    body.print-items-only,
     body.print-items-only html,
     body.print-items-only body,
     body.print-items-only #root {
@@ -1430,6 +1487,16 @@ const ITEMS_PRINT_STYLE = `
       margin: 0 !important;
       padding: 0 !important;
       background: #fff !important;
+    }
+
+    body.print-items-only .nav,
+    body.print-items-only .topbar,
+    body.print-items-only .nav-overlay,
+    body.print-items-only .no-print,
+    body.print-items-only .pagehead,
+    body.print-items-only .jo-modal-header,
+    body.print-items-only .jo-modal-body > *:not(.jo-print-mount) {
+      display: none !important;
     }
 
     body.print-items-only #job-order-print {
@@ -1447,51 +1514,68 @@ const ITEMS_PRINT_STYLE = `
       top: auto !important;
       left: auto !important;
       width: 100% !important;
+      max-width: none !important;
       height: auto !important;
       max-height: none !important;
       overflow: visible !important;
       background: #fff !important;
-      z-index: 99999 !important;
-      padding: 8px !important;
+      z-index: 1 !important;
+      padding: 0 !important;
       margin: 0 !important;
       display: block !important;
+      box-shadow: none !important;
     }
 
     body.print-items-only .jo-print-mount {
-      position: absolute !important;
-      top: 0 !important;
-      left: 0 !important;
+      position: static !important;
+      top: auto !important;
+      left: auto !important;
+      right: auto !important;
       width: 100% !important;
+      max-width: none !important;
       height: auto !important;
       max-height: none !important;
       overflow: visible !important;
-      z-index: 99999 !important;
+      z-index: auto !important;
       visibility: visible !important;
+      background: #fff !important;
+      transform: none !important;
     }
 
     body.print-items-only .shell,
     body.print-items-only .main,
     body.print-items-only .jo-modal-overlay,
     body.print-items-only .jo-modal-panel,
+    body.print-items-only .jo-modal-panel--lg,
     body.print-items-only .jo-modal-body,
     body.print-items-only .jo-modal-form {
       position: static !important;
       inset: auto !important;
+      width: 100% !important;
+      max-width: none !important;
       height: auto !important;
       max-height: none !important;
       overflow: visible !important;
       transform: none !important;
-      background: transparent !important;
+      background: #fff !important;
       box-shadow: none !important;
       border: none !important;
+      border-radius: 0 !important;
       padding: 0 !important;
       margin: 0 !important;
       display: block !important;
+      backdrop-filter: none !important;
+      min-height: 0 !important;
     }
 
     body.print-items-only #job-order-items-print table {
+      width: 100% !important;
       page-break-inside: auto !important;
       break-inside: auto !important;
+      margin: 0 !important;
+    }
+    body.print-items-only #job-order-items-print table + table {
+      margin-top: -1px !important;
     }
     body.print-items-only #job-order-items-print thead {
       display: table-header-group !important;
@@ -1501,10 +1585,27 @@ const ITEMS_PRINT_STYLE = `
       break-inside: avoid !important;
       page-break-after: auto !important;
     }
+    body.print-items-only #job-order-items-print th,
+    body.print-items-only #job-order-items-print td {
+      overflow: hidden !important;
+    }
+    body.print-items-only .jo-receipt-page {
+      width: 100% !important;
+      background: #fff !important;
+      break-inside: auto !important;
+      page-break-inside: auto !important;
+      break-after: page;
+      page-break-after: always;
+    }
+    body.print-items-only .jo-receipt-page:last-child,
+    body.print-items-only .jo-receipt-page[data-print-only="true"] {
+      break-after: auto !important;
+      page-break-after: auto !important;
+    }
   }
 `;
 function PrintItemsTable({ order }) {
-  const items = order.items || [];
+  const lots = receiveLots(order);
   return (
     <>
       <style>{ITEMS_PRINT_STYLE}</style>
@@ -1516,11 +1617,13 @@ function PrintItemsTable({ order }) {
           color: "#1a1a1a",
           lineHeight: 1.4,
           background: "#fff",
-          padding: 18,
+          padding: 0,
           width: "100%",
           boxSizing: "border-box",
         }}
       >
+        {lots.map((lot) => (
+        <div key={lot.id} className="jo-receipt-page" data-lot-id={lot.id}>
         {/* Branded header — just two boxes: logo, and document title */}
         <table
           style={{
@@ -1566,6 +1669,10 @@ function PrintItemsTable({ order }) {
                   style={{ fontWeight: 700, fontSize: 18, letterSpacing: 2 }}
                 >
                   RECEIVING RECEIPT
+                </div>
+                <div style={{ fontWeight: 600, fontSize: 11, marginTop: 4 }}>
+                  Receipt {lot.index}
+                  {lot.total > 1 ? ` of ${lot.total}` : ""}
                 </div>
               </td>
             </tr>
@@ -1669,7 +1776,7 @@ function PrintItemsTable({ order }) {
                 Receving Challan No 
               </td>
               <td style={{ border: "1px solid #000", padding: "5px 10px" }}>
-                {order.challanNo || "—"}
+                {lot.challanNo || order.challanNo || "—"}
               </td>
               <td
                 style={{
@@ -1710,19 +1817,20 @@ function PrintItemsTable({ order }) {
           }}
         >
           <colgroup>
-            <col style={{ width: "2.5%" }} />  {/* Sr */}
-            <col style={{ width: "12%" }} />   {/* Item Description */}
+            <col style={{ width: "4%" }} />    {/* Sr */}
+            <col style={{ width: "14%" }} />   {/* Item Description */}
             <col style={{ width: "6%" }} />    {/* Weight/Pcs */}
-            <col style={{ width: "6%" }} />    {/* Perimeter */}
-            <col style={{ width: "6%" }} />    {/* Length */}
-            <col style={{ width: "7%" }} />    {/* Area/nos */}
-            <col style={{ width: "5.5%" }} />  {/* Outward */}
-            <col style={{ width: "11%" }} />   {/* Received (where) */}
-            <col style={{ width: "5.5%" }} />  {/* Pending */}
-            <col style={{ width: "5.5%" }} />  {/* UOM */}
-            <col style={{ width: "16.5%" }} /> {/* Process / RAL Code / Finish */}
-            <col style={{ width: "8%" }} />    {/* Project Name */}
-            <col style={{ width: "8.5%" }} />  {/* Remark */}
+            <col style={{ width: "6.5%" }} />  {/* Perimeter */}
+            <col style={{ width: "6.5%" }} />  {/* Length */}
+            <col style={{ width: "6.5%" }} />  {/* Area/nos */}
+            <col style={{ width: "6%" }} />    {/* Outward */}
+            <col style={{ width: "12%" }} />   {/* Received (where) */}
+            <col style={{ width: "9%" }} />    {/* Receive date */}
+            <col style={{ width: "6%" }} />    {/* Pending */}
+            <col style={{ width: "5%" }} />    {/* UOM */}
+            <col style={{ width: "8%" }} />    {/* Process / RAL Code / Finish */}
+            <col style={{ width: "6%" }} />    {/* Project Name */}
+            <col style={{ width: "4.5%" }} />  {/* Remark */}
           </colgroup>
           <thead>
             <tr style={{ background: "#f3f1ec" }}>
@@ -1735,6 +1843,7 @@ function PrintItemsTable({ order }) {
                 "Area/nos (Sq in)",
                 "Outward",
                 "Received (where)",
+                "Receive date",
                 "Pending",
                 "UOM",
                 "Process / RAL Code / Finish",
@@ -1745,7 +1854,7 @@ function PrintItemsTable({ order }) {
                   key={h}
                   style={{
                     border: "1px solid #000",
-                    padding: "6px 4px",
+                    padding: "5px 3px",
                     textAlign: "center",
                     fontSize: 8,
                     fontWeight: 700,
@@ -1753,8 +1862,9 @@ function PrintItemsTable({ order }) {
                     letterSpacing: 0,
                     whiteSpace: "normal",
                     wordBreak: "break-word",
-                    lineHeight: 1.25,
+                    lineHeight: 1.2,
                     verticalAlign: "middle",
+                    background: "#f3f1ec",
                   }}
                 >
                   {h}
@@ -1763,13 +1873,10 @@ function PrintItemsTable({ order }) {
             </tr>
           </thead>
           <tbody>
-            {items.map((it, i) => {
-              const received = num(it.receivedQty);
-              const pending = Math.max(0, num(it.qty) - received);
-              const receipts = it.receipts || [];
-              const receivedWhere = receipts.length
-                ? receipts.map((r) => `${r.qty} @ ${r.location}`).join(", ")
-                : "—";
+            {lot.lines.map((line, i) => {
+              const it = line.item;
+              const pending = line.pending;
+              const receipt = line.receipt;
               const cellBase = {
                 border: "1px solid #000",
                 padding: "5px 5px",
@@ -1797,7 +1904,12 @@ function PrintItemsTable({ order }) {
                       : "—"}
                   </td>
                   <td style={{ ...cellBase, textAlign: "center" }}>{it.qty}</td>
-                  <td style={{ ...cellBase, fontSize: 9 }}>{receivedWhere}</td>
+                  <td style={{ ...cellBase, fontSize: 9 }}>
+                    {receiptWhereLabel(receipt)}
+                  </td>
+                  <td style={{ ...cellBase, textAlign: "center", fontSize: 9 }}>
+                    {formatDate(receiptReceivedDate(receipt))}
+                  </td>
                   <td
                     style={{
                       ...cellBase,
@@ -1836,6 +1948,8 @@ function PrintItemsTable({ order }) {
           <div>Generated on {formatDateTime(new Date().toISOString())}</div>
           <div style={{ fontWeight: 700 }}>{COMPANY_NAME}</div>
         </div>
+        </div>
+        ))}
       </div>
     </>
   );
@@ -2224,18 +2338,35 @@ function ViewModal({ order, onClose, onEdit }) {
   // (see handleDownloadItemsPdf below) in case the print dialog is
   // cancelled or closed — 'afterprint' fires either way.
   useEffect(() => {
-    const cleanup = () => document.body.classList.remove("print-items-only");
+    const cleanup = () => {
+      document.body.classList.remove("print-items-only");
+      document
+        .querySelectorAll("#job-order-items-print .jo-receipt-page")
+        .forEach((el) => {
+          el.style.display = "";
+          delete el.dataset.printOnly;
+        });
+    };
     window.addEventListener("afterprint", cleanup);
     return () => window.removeEventListener("afterprint", cleanup);
   }, []);
 
-  function handleDownloadItemsPdf() {
+  function handleDownloadItemsPdf(lotId) {
+    document
+      .querySelectorAll("#job-order-items-print .jo-receipt-page")
+      .forEach((el) => {
+        const show = !lotId || el.dataset.lotId === String(lotId);
+        el.style.display = show ? "block" : "none";
+        if (lotId && show) el.dataset.printOnly = "true";
+        else delete el.dataset.printOnly;
+      });
     setPrintPageSize("landscape");
     document.body.classList.add("print-items-only");
     setTimeout(() => window.print(), 100);
   }
 
   const sendFrom = sendFromFields(detail);
+  const receiptLots = receiveLots(detail);
 
   return (
     <div className="jo-modal-overlay" onClick={onClose}>
@@ -2338,22 +2469,27 @@ function ViewModal({ order, onClose, onEdit }) {
             >
               Items
             </h3>
-            <button
-              onClick={handleDownloadItemsPdf}
-              className="no-print"
-              style={{
-                background: "var(--paper-dim)",
-                border: "1px solid var(--line)",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
-                color: "var(--ink)",
-                padding: "5px 10px",
-              }}
-            >
-              ⬇ Download PDF
-            </button>
+            <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {receiptLots.map((lot) => (
+                <button
+                  key={lot.id}
+                  onClick={() => handleDownloadItemsPdf(lot.id)}
+                  style={{
+                    background: "var(--paper-dim)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--ink)",
+                    padding: "5px 10px",
+                  }}
+                >
+                  ⬇ Receipt {lot.index}
+                  {lot.receivedDate ? ` · ${formatDate(lot.receivedDate)}` : ""}
+                </button>
+              ))}
+            </div>
           </div>
           {/* Off-screen mount feeding the items-only print/PDF (see ITEMS_PRINT_STYLE) */}
           <div
@@ -2374,6 +2510,7 @@ function ViewModal({ order, onClose, onEdit }) {
                   <th className="num">Area/nos (Sq in)</th>
                   <th className="num">Out</th>
                   <th>Received (where)</th>
+                  <th>Receive date</th>
                   <th className="num">Pending</th>
                   <th>UOM</th>
                   <th>Process / RAL Code / Finish</th>
@@ -2416,7 +2553,26 @@ function ViewModal({ order, onClose, onEdit }) {
                                   fontWeight: 600,
                                 }}
                               >
-                                {r.qty} @ {r.location}
+                                {receiptWhereLabel(r)}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: "#8a8270" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        {receipts.length ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 2,
+                            }}
+                          >
+                            {receipts.map((r, ri) => (
+                              <span key={ri} style={{ fontWeight: 600 }}>
+                                {formatDate(receiptReceivedDate(r))}
                               </span>
                             ))}
                           </div>
@@ -2537,6 +2693,7 @@ function ReceiveModal({ order, onSave, onClose }) {
   const { user } = useAuth();
   const [receivedBy, setReceivedBy] = useState("");
   const [challanNo, setChallanNo] = useState("");
+  const [receivedDate, setReceivedDate] = useState(todayStr());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -2550,6 +2707,9 @@ function ReceiveModal({ order, onSave, onClose }) {
   );
   const [locationInputs, setLocationInputs] = useState(() =>
     (order.items || []).map(() => LOCATIONS[0]),
+  );
+  const [siteNames, setSiteNames] = useState(() =>
+    (order.items || []).map(() => ""),
   );
 
   useEffect(() => {
@@ -2578,12 +2738,19 @@ function ReceiveModal({ order, onSave, onClose }) {
   function setItemLocation(i, val) {
     setLocationInputs((list) => list.map((v, idx) => (idx === i ? val : v)));
   }
+  function setSiteName(i, val) {
+    setSiteNames((list) => list.map((v, idx) => (idx === i ? val : v)));
+  }
 
   async function handleSave(e) {
     e.preventDefault();
     setErr("");
     if (!receivedBy.trim()) {
       setErr("Please enter who received the goods.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(receivedDate || "").trim())) {
+      setErr("Receive date is compulsory.");
       return;
     }
 
@@ -2605,14 +2772,23 @@ function ReceiveModal({ order, onSave, onClose }) {
         );
         return;
       }
+      const siteName = String(siteNames[i] || "").trim();
       if (receiving > 0) {
         anyReceiving = true;
         if (!locationInputs[i]) {
           setErr(`Choose a location for "${it.description}".`);
           return;
         }
+        if (locationInputs[i] === "Site" && !siteName) {
+          setErr(`Site name is compulsory for "${it.description}".`);
+          return;
+        }
       }
-      itemsPayload.push({ receiving, location: locationInputs[i] });
+      itemsPayload.push({
+        receiving,
+        location: locationInputs[i],
+        siteName: locationInputs[i] === "Site" ? siteName : "",
+      });
     }
     if (!anyReceiving) {
       setErr(
@@ -2623,7 +2799,13 @@ function ReceiveModal({ order, onSave, onClose }) {
 
     setSaving(true);
     try {
-      const payload = { items: itemsPayload, receivedBy, challanNo, note };
+      const payload = {
+        items: itemsPayload,
+        receivedBy,
+        challanNo,
+        receivedDate,
+        note,
+      };
       console.log(
         "[ReceiveModal] submitting receive payload",
         order._id,
@@ -2665,8 +2847,9 @@ function ReceiveModal({ order, onSave, onClose }) {
         >
           <div className="jo-modal-body">
             <div className="jo-receive-hint">
-              Items — enter qty received now, and where. Leave less than the
-              full amount to receive the rest later.
+              Items — enter qty received now, and where. If you choose Site,
+              type the site name. Receive date is required. Leave less than
+              the full amount to receive the rest later.
             </div>
             <div
               style={{
@@ -2680,6 +2863,8 @@ function ReceiveModal({ order, onSave, onClose }) {
                 const already = num(it.receivedQty);
                 const remaining = Math.max(0, num(it.qty) - already);
                 const receiving = num(qtyInputs[i]);
+                const needsSite =
+                  locationInputs[i] === "Site" && remaining > 0 && receiving > 0;
                 return (
                   <div key={i} className="jo-receive-row">
                     <div>
@@ -2737,6 +2922,23 @@ function ReceiveModal({ order, onSave, onClose }) {
                         ))}
                       </select>
                     </div>
+                    {needsSite && (
+                      <div
+                        className="field"
+                        style={{ margin: 0, gridColumn: "1 / -1" }}
+                      >
+                        <label>
+                          Site name{" "}
+                          <span style={{ color: "var(--red)" }}>*</span>
+                        </label>
+                        <input
+                          value={siteNames[i]}
+                          onChange={(e) => setSiteName(i, e.target.value)}
+                          placeholder="Type the site name"
+                          required
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2762,6 +2964,19 @@ function ReceiveModal({ order, onSave, onClose }) {
                   onChange={(e) => setChallanNo(e.target.value)}
                   placeholder="Vendor's delivery challan no."
                   required
+                />
+              </div>
+              <div className="field full">
+                <label>
+                  Receive date <span style={{ color: "var(--red)" }}>*</span>
+                </label>
+                <input
+                  type="date"
+                  value={receivedDate}
+                  onChange={(e) => setReceivedDate(e.target.value)}
+                  onClick={(e) => e.target.showPicker && e.target.showPicker()}
+                  required
+                  style={{ cursor: "pointer" }}
                 />
               </div>
             </div>
@@ -3537,7 +3752,13 @@ export default function JobOrder() {
   // computes status, appends receipts, and writes its own history entry.
   // Supports PARTIAL receiving — items not fully received stay "pending" and
   // the order's status becomes 'partial', so the list shows "Continue receiving".
-  async function handleReceive({ items, receivedBy, challanNo, note }) {
+  async function handleReceive({
+    items,
+    receivedBy,
+    challanNo,
+    receivedDate,
+    note,
+  }) {
     const order = receiveOrder;
     if (!order?._id) {
       console.error(
@@ -3552,6 +3773,7 @@ export default function JobOrder() {
       items,
       receivedBy,
       challanNo,
+      receivedDate,
       note,
     });
     setReceiveOrder(null);
