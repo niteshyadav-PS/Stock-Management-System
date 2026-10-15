@@ -821,7 +821,7 @@ export default function InwardEntry() {
   const navigate = useNavigate();
   const location = useLocation();
   const canSeePrice = user?.role === "admin" || user?.role === "purchase";
-  const canEditDelete = user?.role === "admin"|| user?.role === "store" || user?.role === "store_manager";
+  const canEditDelete = user?.role === "admin" || user?.role === "store_manager";
   const canRenameNames = user?.role === "admin" || user?.role === "purchase";
 
   const [master, setMaster] = useState([]);

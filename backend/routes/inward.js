@@ -245,8 +245,8 @@ router.patch('/:id', authMiddleware, requireRole('admin','purchase'), async (req
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PUT /api/inward/:id — full edit (admin + store team)
-router.put('/:id', authMiddleware, requireRole('admin','store','store_manager'), async (req, res) => {
+// PUT /api/inward/:id — full edit (admin + store manager)
+router.put('/:id', authMiddleware, requireRole('admin','store_manager'), async (req, res) => {
   try {
     const data = pickFields(req.body, INWARD_FIELDS);
     if (data.qty   !== undefined) data.qty   = parseFloat(data.qty)   || 0;
@@ -270,7 +270,7 @@ router.put('/:id', authMiddleware, requireRole('admin','store','store_manager'),
 });
 
 // DELETE /api/inward/:id
-router.delete('/:id', authMiddleware, requireRole('admin','store','store_manager'), async (req, res) => {
+router.delete('/:id', authMiddleware, requireRole('admin','store_manager'), async (req, res) => {
   try {
     const doc = await Inward.findByIdAndDelete(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Not found.' });
