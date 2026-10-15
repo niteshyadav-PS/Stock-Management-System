@@ -119,6 +119,7 @@ export const deleteOutward = (id) => client.delete(`/outward/${id}`);
 // ── Users ─────────────────────────────────────────────────────────────────────
 export const getUsers = (params) => client.get(withQuery("/users", params || {}));
 export const saveUser = (data) => client.post("/users", data);
+export const updateUser = (username, data) => client.patch(`/users/${encodeURIComponent(username)}`, data);
 export const deleteUser = (username) => client.delete(`/users/${username}`);
 export const recordUserPassword = (username, plainPassword) =>
   client.patch(`/users/${username}/password`, { plainPassword });

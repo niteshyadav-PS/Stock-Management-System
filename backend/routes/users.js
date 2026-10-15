@@ -38,6 +38,49 @@ router.post('/', authMiddleware, requireRole('admin'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+const ROLES = ['admin', 'store', 'store_manager', 'purchase', 'accounts', 'viewer'];
+
+// PATCH /api/users/:username — admin edits name, role, username, and password
+router.patch('/:username', authMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const currentName = String(req.params.username || '').toLowerCase().trim();
+    const current = await User.findOne({ username: currentName });
+    if (!current) return res.status(404).json({ error: 'User not found' });
+
+    const name = String(req.body.name || '').trim();
+    const nextUsername = String(req.body.username || current.username).toLowerCase().trim();
+    const role = req.body.role || current.role;
+    const password = req.body.password != null ? String(req.body.password) : '';
+
+    if (!name) return res.status(400).json({ error: 'Name is required.' });
+    if (!nextUsername) return res.status(400).json({ error: 'Username is required.' });
+    if (!ROLES.includes(role)) return res.status(400).json({ error: 'Choose a valid role.' });
+
+    if (nextUsername !== current.username) {
+      const taken = await User.findOne({ username: nextUsername });
+      if (taken) return res.status(400).json({ error: 'That username is already in use.' });
+    }
+
+    const update = { name, username: nextUsername, role };
+    if (password.trim()) {
+      update.password = await bcrypt.hash(password, 10);
+      update.plainPassword = password;
+    }
+
+    const user = await User.findOneAndUpdate(
+      { username: current.username },
+      { $set: update },
+      { new: true }
+    );
+    res.json({
+      name: user.name,
+      username: user.username,
+      role: user.role,
+      plainPassword: user.plainPassword,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // PATCH /api/users/:username/password — record plain password for existing user
 router.patch('/:username/password', authMiddleware, requireRole('admin'), async (req, res) => {
   try {

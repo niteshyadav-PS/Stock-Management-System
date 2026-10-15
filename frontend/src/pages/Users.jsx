@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FaEye, FaEyeSlash } from 'react-icons/fa';
-import { getUsers, saveUser, deleteUser, recordUserPassword, unwrapList } from '../api/api';
+import { getUsers, saveUser, updateUser, deleteUser, recordUserPassword, unwrapList } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_LABELS } from '../utils/helpers';
 import Pagination from '../components/Pagination';
@@ -18,10 +18,11 @@ const ROLE_COLORS = {
 };
 
 export default function Users() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, updateUser: patchSession } = useAuth();
 
   const [users,        setUsers]        = useState([]);
   const [form,         setForm]         = useState(EMPTY);
+  const [editing,      setEditing]      = useState(null);
   const [msg,          setMsg]          = useState({ text: '', ok: true });
   const [showPassword, setShowPassword] = useState(false);
   const [visiblePwds,  setVisiblePwds]  = useState({});
@@ -32,18 +33,51 @@ export default function Users() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  function startEdit(u) {
+    setEditing(u.username);
+    setForm({
+      name: u.name || '',
+      username: u.username || '',
+      password: u.plainPassword || '',
+      role: u.role || 'viewer',
+    });
+    setShowPassword(false);
+    setMsg({ text: '', ok: true });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function cancelEdit() {
+    setEditing(null);
+    setForm(EMPTY);
+    setShowPassword(false);
+    setMsg({ text: '', ok: true });
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setMsg({ text: '', ok: true });
-    if (!form.name || !form.username || !form.password) {
+    if (!form.name.trim() || !form.username.trim()) {
+      setMsg({ text: 'Name and username are required.', ok: false });
+      return;
+    }
+    if (!editing && !form.password) {
       setMsg({ text: 'Name, username and password are required.', ok: false });
       return;
     }
     try {
-      await saveUser(form);
-      setMsg({ text: 'User saved successfully.', ok: true });
-      setForm(EMPTY);
-      setShowPassword(false);
+      if (editing) {
+        const saved = await updateUser(editing, form);
+        if (editing === currentUser?.username) {
+          patchSession({ name: saved.name, username: saved.username, role: saved.role });
+        }
+        cancelEdit();
+        setMsg({ text: 'User updated.', ok: true });
+      } else {
+        await saveUser(form);
+        setMsg({ text: 'User saved successfully.', ok: true });
+        setForm(EMPTY);
+        setShowPassword(false);
+      }
       load();
       setTimeout(() => setMsg({ text: '', ok: true }), 4000);
     } catch (err) {
@@ -94,7 +128,7 @@ export default function Users() {
       </div>
 
       <div className="card">
-        <h3>Add / Update User</h3>
+        <h3>{editing ? `Edit ${editing}` : 'Add user'}</h3>
         <form onSubmit={handleSubmit}>
           <div className="formgrid">
             <div className="field">
@@ -103,7 +137,12 @@ export default function Users() {
             </div>
             <div className="field">
               <label>Username</label>
-              <input value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="e.g. priya" />
+              <input
+                value={form.username}
+                onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
+                placeholder="e.g. priya"
+                readOnly={editing === currentUser?.username}
+              />
             </div>
             <div className="field">
               <label>Password</label>
@@ -112,7 +151,7 @@ export default function Users() {
                   type={showPassword ? 'text' : 'password'}
                   value={form.password}
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  placeholder="Set a password"
+                  placeholder={editing ? 'Leave blank to keep the current password' : 'Set a password'}
                   style={{ width: '100%', paddingRight: '45px' }}
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
@@ -135,7 +174,10 @@ export default function Users() {
             </div>
           </div>
           <div className="actionrow">
-            <button className="btn btn-in" type="submit">Save User</button>
+            <button className="btn btn-in" type="submit">{editing ? 'Save changes' : 'Save User'}</button>
+            {editing && (
+              <button className="btn btn-ghost" type="button" onClick={cancelEdit}>Cancel</button>
+            )}
             {msg.text && <span className={`msg ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</span>}
           </div>
         </form>
@@ -207,9 +249,12 @@ export default function Users() {
                       )}
                     </td>
                     <td>
-                      {u.username !== currentUser?.username && (
-                        <button className="btn-del btn-sm" onClick={() => handleDelete(u.username)} title="Delete user">🗑</button>
-                      )}
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-ghost btn-sm" type="button" onClick={() => startEdit(u)} title="Edit profile and password">✏ Edit</button>
+                        {u.username !== currentUser?.username && (
+                          <button className="btn-del btn-sm" onClick={() => handleDelete(u.username)} title="Delete user">🗑</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
