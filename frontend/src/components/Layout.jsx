@@ -6,6 +6,42 @@ import { ROLE_LABELS } from "../utils/helpers";
 // ── Nav grouped by section ────────────────────────────────────────────────────
 const NAV_SECTIONS = [
   {
+    label: "Job Order",
+    icon: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
+      </svg>
+    ),
+    items: [
+      {
+        label: "Powder Coating",
+        path: "/job-orders",
+        roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
+      },
+      {
+        label: "Fabrication",
+        path: "/job-orders/fabrication",
+        roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
+      },
+      {
+        label: "My Job Orders",
+        path: "/job-orders",
+        roles: ["vendor"],
+      },
+    ],
+  },
+  {
     label: "Store",
     icon: (
       <svg
@@ -170,11 +206,6 @@ const TOP_LINKS = [
     path: "/stock",
     roles: ["admin"],
   },
-  {
-        label: "Job Orders",
-        path: "/job-orders",
-        roles: ["admin", "store_manager", "store", "viewer", "purchase"],
-      },
 ];
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -238,6 +269,11 @@ export default function Layout() {
         navigate("/stock");
         break;
 
+      case "vendor":
+      case "quality":
+        navigate("/job-orders");
+        break;
+
       default:
         navigate("/stock");
     }
@@ -262,6 +298,10 @@ export default function Layout() {
 
   // Current page label for topbar
   let currentPage = "Dashboard";
+  const topMatch = TOP_LINKS.find(
+    (l) => l.path === location.pathname && l.roles.includes(role),
+  );
+  if (topMatch) currentPage = topMatch.label;
   for (const s of NAV_SECTIONS) {
     const found = s.items.find((i) => i.path === location.pathname);
     if (found) {
@@ -406,9 +446,10 @@ export default function Layout() {
                     className={`nav-section-items${isExpanded ? " open" : ""}`}
                   >
                     {visibleItems.map((item) => (
-                      <li key={item.path}>
+                      <li key={`${item.path}-${item.label}`}>
                         <NavLink
                           to={item.path}
+                          end={item.path === "/job-orders"}
                           className={({ isActive }) =>
                             isActive ? "active" : undefined
                           }

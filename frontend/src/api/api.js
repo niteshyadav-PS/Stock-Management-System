@@ -150,6 +150,9 @@ export const getPurchaseOrdersByPR = (prId) =>
 export const getPurchaseOrderByNumber = (poNumber) =>
   client.get(`/purchase-orders/by-number/${encodeURIComponent(poNumber)}`);
 
+export const getPurchaseOrderById = (id) =>
+  client.get(`/purchase-orders/${encodeURIComponent(id)}`);
+
 export const getPendingInwardPOs = () => client.get("/purchase-orders/pending-inward");
 
 export const getPoMatching = () => client.get("/purchase-orders/po-matching");
@@ -171,3 +174,9 @@ export const getPurchaseOrderActivity = (id) => client.get(`/purchase-orders/${i
 // ── Job orders ───────────────────────────────────────────────────────────────
 export const getJobOrders = (params) =>
   client.get(withQuery("/job-orders", params || {}));
+
+export const updateJobOrderQcStage = (id, data) =>
+  client.patch(`/job-orders/${id}/qc-stage`, data);
+
+export const acknowledgeJobOrder = (id, data) =>
+  client.patch(`/job-orders/${id}/vendor-ack`, data);

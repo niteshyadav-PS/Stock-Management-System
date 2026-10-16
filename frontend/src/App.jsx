@@ -15,6 +15,7 @@ import Dashboard from "./pages/Dashboard";
 import PoMatching from "./pages/PoMatching";
 import PurchaseOrders from "./pages/PurchaseOrders";
 import JobOrder from './pages/JobOrder';
+import VendorQc from './pages/VendorQc';
 
 const ROLE_ACCESS = {
   dashboard: ["admin", "store", "store_manager", "purchase"],
@@ -28,7 +29,7 @@ const ROLE_ACCESS = {
   purchaseRequests: ["admin", "store", "store_manager", "viewer"],
   purchaseOrders: ["admin", "purchase"],
   poMatching: ["admin", "purchase", "store", "store_manager"],
-  jobOrders: ['admin', 'store_manager', 'store', 'viewer', 'purchase'],
+  jobOrders: ['admin', 'store_manager', 'store', 'viewer', 'purchase', 'vendor', 'quality'],
 };
 
 function getDefaultPath(role) {
@@ -47,6 +48,10 @@ function getDefaultPath(role) {
     case "viewer":
       return "/stock";
 
+    case "vendor":
+    case "quality":
+      return "/job-orders";
+
     default:
       return "/stock";
   }
@@ -57,12 +62,20 @@ function ProtectedRoute({ page, children }) {
   if (!user) return <Navigate to="/login" replace />;
   const allowed = ROLE_ACCESS[page] || [];
   if (!allowed.includes(user.role)) {
-    const first = Object.entries(ROLE_ACCESS).find(
-      ([pg, roles]) => roles.includes(user.role) && pg !== page,
-    );
-    return <Navigate to={first ? `/${first[0]}` : "/login"} replace />;
+    return <Navigate to={getDefaultPath(user.role)} replace />;
   }
   return children;
+}
+
+function JobOrderGate({ jobType = "powder_coating" }) {
+  const { user } = useAuth();
+  // Vendor: always scoped to their assigned type (ignore route).
+  if (user?.role === "vendor") return <VendorQc />;
+  // QC: separate Powder Coating / Fabrication pages in the sidebar (same as store).
+  if (user?.role === "quality") {
+    return <VendorQc key={jobType} jobType={jobType} />;
+  }
+  return <JobOrder jobType={jobType} />;
 }
 
 function AppRoutes() {
@@ -181,7 +194,22 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        <Route path="/job-orders" element={<ProtectedRoute page="jobOrders"><JobOrder /></ProtectedRoute>} />
+        <Route
+          path="/job-orders"
+          element={
+            <ProtectedRoute page="jobOrders">
+              <JobOrderGate jobType="powder_coating" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/job-orders/fabrication"
+          element={
+            <ProtectedRoute page="jobOrders">
+              <JobOrderGate jobType="fabrication" />
+            </ProtectedRoute>
+          }
+        />
       </Route>
       
       <Route path="*" element={<Navigate to={defaultPath} replace />} />

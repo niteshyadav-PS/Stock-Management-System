@@ -5,8 +5,16 @@ import { useAuth } from '../context/AuthContext';
 import { ROLE_LABELS } from '../utils/helpers';
 import Pagination from '../components/Pagination';
 import useClientPagination from '../hooks/useClientPagination';
+import { jobTypeLabel, vendorNamesForJobType } from '../utils/jobOrderVendors';
 
-const EMPTY = { name: '', username: '', password: '', role: 'viewer' };
+const EMPTY = {
+  name: '',
+  username: '',
+  password: '',
+  role: 'viewer',
+  vendorName: '',
+  vendorJobType: 'powder_coating',
+};
 
 const ROLE_COLORS = {
   admin:         { bg: '#e6f2f0', color: 'var(--teal-dark)' },
@@ -15,6 +23,8 @@ const ROLE_COLORS = {
   purchase:      { bg: '#f8ede7', color: 'var(--rust-dark)' },
   accounts:      { bg: '#e8f4ea', color: '#1b5e20' },
   viewer:        { bg: 'var(--paper-dim)', color: '#5a5444' },
+  vendor:        { bg: '#fff7ed', color: '#9a3412' },
+  quality:       { bg: '#e0f2fe', color: '#075985' },
 };
 
 export default function Users() {
@@ -27,20 +37,40 @@ export default function Users() {
   const [showPassword, setShowPassword] = useState(false);
   const [visiblePwds,  setVisiblePwds]  = useState({});
   const [recordingPwd, setRecordingPwd] = useState({});
+  const [otherVendor, setOtherVendor] = useState(false);
+  const [listFilter, setListFilter] = useState('all');
 
   const load = useCallback(async () => {
     try { setUsers(unwrapList(await getUsers())); } catch {}
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const filteredUsers = users.filter((u) => {
+    if (listFilter === 'all') return true;
+    if (listFilter === 'staff') return u.role !== 'vendor';
+    if (listFilter === 'powder_coating') {
+      return u.role === 'vendor' && u.vendorJobType !== 'fabrication';
+    }
+    if (listFilter === 'fabrication') {
+      return u.role === 'vendor' && u.vendorJobType === 'fabrication';
+    }
+    return true;
+  });
+
   function startEdit(u) {
+    const vendorJobType =
+      u.vendorJobType === 'fabrication' ? 'fabrication' : 'powder_coating';
+    const names = vendorNamesForJobType(vendorJobType);
     setEditing(u.username);
     setForm({
       name: u.name || '',
       username: u.username || '',
       password: u.plainPassword || '',
       role: u.role || 'viewer',
+      vendorName: u.vendorName || '',
+      vendorJobType,
     });
+    setOtherVendor(!!u.vendorName && !names.includes(u.vendorName));
     setShowPassword(false);
     setMsg({ text: '', ok: true });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -49,6 +79,7 @@ export default function Users() {
   function cancelEdit() {
     setEditing(null);
     setForm(EMPTY);
+    setOtherVendor(false);
     setShowPassword(false);
     setMsg({ text: '', ok: true });
   }
@@ -64,11 +95,25 @@ export default function Users() {
       setMsg({ text: 'Name, username and password are required.', ok: false });
       return;
     }
+    if (form.role === 'vendor' && !form.vendorJobType) {
+      setMsg({ text: 'Choose Powder Coating or Fabrication for this vendor.', ok: false });
+      return;
+    }
+    if (form.role === 'vendor' && !form.vendorName.trim()) {
+      setMsg({ text: 'Choose the vendor company for this login.', ok: false });
+      return;
+    }
     try {
       if (editing) {
         const saved = await updateUser(editing, form);
         if (editing === currentUser?.username) {
-          patchSession({ name: saved.name, username: saved.username, role: saved.role });
+          patchSession({
+            name: saved.name,
+            username: saved.username,
+            role: saved.role,
+            vendorName: saved.vendorName || '',
+            vendorJobType: saved.vendorJobType || '',
+          });
         }
         cancelEdit();
         setMsg({ text: 'User updated.', ok: true });
@@ -116,14 +161,16 @@ export default function Users() {
 
   const roleStyle = (role) => ROLE_COLORS[role] || ROLE_COLORS.viewer;
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
-    useClientPagination(users, 25);
+    useClientPagination(filteredUsers, 25);
 
   return (
     <>
       <div className="pagehead">
         <div className="pagehead-text">
           <h2>Users</h2>
-          <p>Manage team access. Each role controls which pages and data a user can see.</p>
+          <p>
+            Manage team access. Create separate vendor logins for Powder Coating and Fabrication — each only sees their own challans.
+          </p>
         </div>
       </div>
 
@@ -163,15 +210,88 @@ export default function Users() {
             </div>
             <div className="field">
               <label>Role</label>
-              <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+              <select
+                value={form.role}
+                onChange={e => {
+                  const role = e.target.value;
+                  setOtherVendor(false);
+                  setForm(f => ({
+                    ...f,
+                    role,
+                    vendorName: role === 'vendor' ? f.vendorName : '',
+                    vendorJobType: role === 'vendor' ? (f.vendorJobType || 'powder_coating') : 'powder_coating',
+                  }));
+                }}
+              >
                 <option value="admin">Admin — Full Access</option>
                 <option value="store">Store Team — Inward + Outward</option>
                 <option value="store_manager">Store Manager — Approve Requests</option>
                 <option value="purchase">Purchase Team</option>
                 <option value="accounts">Accounts — Live Stock and Reports</option>
                 <option value="viewer">Viewer — Read Only</option>
+                <option value="quality">QC Team — Approve inspection</option>
+                <option value="vendor">Vendor — Separate Powder Coating or Fabrication login</option>
               </select>
             </div>
+            {form.role === 'vendor' && (
+              <>
+                <div className="field">
+                  <label>Vendor login type</label>
+                  <select
+                    value={form.vendorJobType || 'powder_coating'}
+                    onChange={e => {
+                      const vendorJobType = e.target.value;
+                      const names = vendorNamesForJobType(vendorJobType);
+                      setOtherVendor(false);
+                      setForm(f => ({
+                        ...f,
+                        vendorJobType,
+                        vendorName: names.includes(f.vendorName) ? f.vendorName : '',
+                      }));
+                    }}
+                  >
+                    <option value="powder_coating">Powder Coating vendor</option>
+                    <option value="fabrication">Fabrication vendor</option>
+                  </select>
+                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4 }}>
+                    Create a separate username for each type. Powder coating vendors only see powder coating challans; fabrication vendors only see fabrication.
+                  </div>
+                </div>
+                <div className="field">
+                  <label>
+                    {form.vendorJobType === 'fabrication' ? 'Fabrication' : 'Powder Coating'} company
+                  </label>
+                  <select
+                    value={otherVendor ? '__other__' : form.vendorName}
+                    onChange={e => {
+                      const value = e.target.value;
+                      const names = vendorNamesForJobType(form.vendorJobType || 'powder_coating');
+                      if (value === '__other__') {
+                        setOtherVendor(true);
+                        setForm(f => ({ ...f, vendorName: names.includes(f.vendorName) ? '' : f.vendorName }));
+                      } else {
+                        setOtherVendor(false);
+                        setForm(f => ({ ...f, vendorName: value }));
+                      }
+                    }}
+                  >
+                    <option value="">Select company…</option>
+                    {vendorNamesForJobType(form.vendorJobType || 'powder_coating').map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value="__other__">Other (type company name)</option>
+                  </select>
+                  {otherVendor && (
+                    <input
+                      style={{ marginTop: 8 }}
+                      value={form.vendorName}
+                      onChange={e => setForm(f => ({ ...f, vendorName: e.target.value }))}
+                      placeholder="Exact company name used on the job order"
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </div>
           <div className="actionrow">
             <button className="btn btn-in" type="submit">{editing ? 'Save changes' : 'Save User'}</button>
@@ -184,7 +304,24 @@ export default function Users() {
       </div>
 
       <div className="card card-wide">
-        <h3>Team Members <span className="pill-count">{users.length}</span></h3>
+        <h3>Team Members <span className="pill-count">{filteredUsers.length}</span></h3>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          {[
+            ['all', 'All'],
+            ['powder_coating', 'Powder Coating vendors'],
+            ['fabrication', 'Fabrication vendors'],
+            ['staff', 'Staff'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={listFilter === id ? 'btn btn-in btn-sm' : 'btn btn-ghost btn-sm'}
+              onClick={() => setListFilter(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="tablewrap">
           <table>
             <thead>
@@ -211,6 +348,12 @@ export default function Users() {
                       <span className="role-pill" style={{ background: rs.bg, color: rs.color, borderColor: 'transparent' }}>
                         {ROLE_LABELS[u.role] || u.role}
                       </span>
+                      {u.role === 'vendor' && (u.vendorName || u.vendorJobType) && (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 4 }}>
+                          {jobTypeLabel(u.vendorJobType === 'fabrication' ? 'fabrication' : 'powder_coating')}
+                          {u.vendorName ? ` · ${u.vendorName}` : ''}
+                        </div>
+                      )}
                     </td>
                     <td>
                       {plain ? (

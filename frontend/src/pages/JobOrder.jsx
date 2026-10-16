@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { Fragment, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../context/AuthContext";
 import { todayStr } from "../utils/helpers";
 import { unwrapList } from "../api/api";
 import Pagination from "../components/Pagination";
+import VendorQc from "./VendorQc";
 import useClientPagination from "../hooks/useClientPagination";
+import { vendorsForJobType } from "../utils/jobOrderVendors";
 
 // ── Excel-style dropdown filter (same pattern as Live Stock) ──────────────────
 function ColFilter({ values, selected, onChange }) {
@@ -484,6 +486,25 @@ const emptyItem = () => ({
 
 const CREATE_ROLES = ["admin", "store_manager", "store", "purchase"];
 
+/** Preset item descriptions for Fabrication challans (searchable dropdown). */
+const FABRICATION_ITEM_DESCRIPTIONS = [
+  "Vertical Drop clamp",
+  "90* Form clamp",
+  "L angle ( 56x41 )",
+  "L angle ( 56x56 )",
+  "L angle ( 56x96 )",
+  "C washer",
+  "4 way Bracket",
+  "1 way joint clamp",
+  "2 way Joint clamp",
+  "3 way Joint clamp",
+  "4 way Joint clamp",
+  "One way hook clamp",
+  "41x41 C Strut Connector",
+  "Outer C clamp",
+  "Seismic hook clamp",
+  "Big C clamp",
+];
 
 const LOCATIONS = ["Factory", "Site"];
 const UNITS = ["NOS", "MTR", "KG", "SET", "PKT", "BOX", "LTR"];
@@ -521,64 +542,13 @@ const OTHER_PROCESS = "__other_process__";
 function finalizeProcess(it) {
   if (it.process === OTHER_PROCESS) return String(it.processOther || "").trim();
   if (PROCESS_SUBOPTIONS[it.process]) {
-    return it.processSub || it.process;
+    return String(it.processSub || it.process || "").trim();
   }
-  return it.process || "";
+  return String(it.process || "").trim();
 }
 
 
 
-const VENDORS = [
-  {
-    name: "Navdurga Electroplating",
-    address:
-      "Gala No-17, Classical Ind-Estate-02, Khair Pada, Chaudhari Compound-B, Waliv, Vasai(E), Palghar - 401208",
-  },
-  {
-    name: "Aarti Electroplating",
-    address:
-      "Gala No Q/12, Sector No.46, Sagar IND.EST. Near Quality Hardware, Dhumal Nagar, Waliv village, Vasai road(E)",
-  },
-  {
-    name: "RN Electroplating",
-    address:
-      "Shop no.7 Sr.no. 106, Maniccha pada, Vasai, Richard compund, Vasai East - 401208",
-  },
-  {
-    name: "C - Tech Electronics",
-    address:
-      "Shop No 09, Krushi Plaza, Plot no 15, Sector - 19 Apmc, Vashi, Navi Mumbai - 400705",
-  },
-  {
-    name: "Quest Enterprises Pvt Ltd",
-    address: "G/140-A, Ansa Industrial Estate, Sakinaka Mumbai 400072",
-  },
-  {
-    name: "Fusion Metal Architects And Innovators",
-    address: "Plot No R - 398 MIDC TTC Ind Area, Rabale Navi Mumbai - 400701",
-  },
-  {
-    name: "G.K Powder Coating",
-    address:
-      "Gala No.09/10 Ground Floor, Indian Corporation Bldg No 200, Gundwawali Road, Bhiwandi, Thane - 421302",
-  },
-  {
-    name: "RAPID INDUSTRIES",
-    address:
-      "F/5,Nand Jyot Indl. Estate, Safed Pool, Sakinaka, Andheri-East, Mumbai-400072",
-  },
-  {
-    name: "Om Darshan Speciality Surfaces Pvt Ltd.",
-    address:
-      "Plot no.13, Dewan & Sons Industrial Estate Palghar (W) 401404 Maharashtra",
-  },
-  {
-    name: "META COAT",
-    address:
-      "Ground Floor, H. No. 666/B, Dive Anjur Road Nr. Sricon RMC Plant, Dive Anjur Bhiwandi 421302 Maharashtra",
-  },
-
-];
 const OTHER_VENDOR = "__other__";
 
 // Preset "Send From" party — currently just the company itself. Selecting it
@@ -722,8 +692,15 @@ const EMPTY_COL_FILTERS = {
   issuedBy: [],
   dispatchedQty: [],
   receivedQty: [],
+  vendorExpected: [],
   status: [],
 };
+
+function vendorExpectedLabel(order) {
+  const raw = String(order?.vendorExpectedDate || "").trim();
+  if (!raw) return "—";
+  return formatDate(raw);
+}
 
 // dd/mm/yyyy, hh:mm AM/PM — used for history timestamps.
 function formatDateTime(d) {
@@ -761,6 +738,109 @@ function statusLabel(order) {
   const pct = receivePercent(order);
   const label = status.charAt(0).toUpperCase() + status.slice(1);
   return `${label} (${pct}%)`;
+}
+
+function qcSummary(order) {
+  if (!String(order?.vendorExpectedDate || "").trim()) {
+    return "Waiting for vendor receive";
+  }
+  let pending = 0;
+  let dispatch = 0;
+  for (const it of order?.items || []) {
+    for (const round of it.qcRounds || []) {
+      if (round.status === "pending") pending += 1;
+      else dispatch += Number(round.dispatchQty) || 0;
+    }
+  }
+  const parts = [];
+  if (pending) parts.push(`${pending} with QC`);
+  if (dispatch) parts.push(`${Math.round(dispatch * 1000) / 1000} ready to dispatch`);
+  const rework = (order?.items || []).reduce((sum, it) => sum + reworkQty(it), 0);
+  if (rework > 0.001) parts.push(`${Math.round(rework * 1000) / 1000} rework`);
+  return parts.length ? parts.join(" · ") : "Waiting for vendor qty";
+}
+
+function qcPercent(qty, orderQty) {
+  const total = Number(orderQty);
+  if (!total || !qty) return 0;
+  return Math.round((Number(qty) / total) * 10000) / 100;
+}
+
+function qcQtyLabel(qty, orderQty) {
+  const n = Number(qty) || 0;
+  if (!n) return "—";
+  return `${Math.round(n * 1000) / 1000} (${qcPercent(n, orderQty)}%)`;
+}
+
+function reworkQty(item) {
+  const rejected = (item?.qcRounds || []).reduce((sum, round) => {
+    if (round.status !== "inspected") return sum;
+    return sum + num(round.rejectedQty);
+  }, 0);
+  const sentBack = (item?.qcRounds || []).reduce((sum, round) => {
+    if (round.origin !== "rework") return sum;
+    return sum + num(round.readyQty);
+  }, 0);
+  return Math.max(0, Math.round((rejected - sentBack) * 1000) / 1000);
+}
+
+function readyToDispatchQty(item) {
+  const total = (item?.qcRounds || []).reduce((sum, round) => {
+    if (round.status !== "inspected") return sum;
+    return sum + num(round.dispatchQty);
+  }, 0);
+  return Math.round(total * 1000) / 1000;
+}
+
+function receivableNow(item) {
+  const dispatchLeft = Math.max(0, readyToDispatchQty(item) - num(item?.receivedQty));
+  const orderLeft = Math.max(0, num(item?.qty) - num(item?.receivedQty));
+  return Math.round(Math.min(dispatchLeft, orderLeft) * 1000) / 1000;
+}
+
+function qcLine(item) {
+  const rounds = item?.qcRounds || [];
+  const pendingQty = rounds.reduce(
+    (sum, round) => sum + (round.status === "pending" ? Number(round.readyQty) || 0 : 0),
+    0,
+  );
+  const readyQty = rounds.reduce((sum, round) => {
+    if (round.origin === "rework") return sum;
+    return sum + (Number(round.readyQty) || 0);
+  }, 0);
+  const orderQty = Number(item?.qty) || 0;
+  const percent = qcPercent(readyQty, orderQty);
+  let dispatch = 0;
+  let rejected = 0;
+  for (const round of rounds) {
+    if (round.status !== "inspected") continue;
+    dispatch += Number(round.dispatchQty) || 0;
+    rejected += Number(round.rejectedQty) || 0;
+  }
+  const rework = reworkQty(item);
+  const reworkNotes = rounds
+    .filter((round) => round.status === "inspected" && Number(round.rejectedQty) > 0 && String(round.reworkRemark || "").trim())
+    .map((round) => ({
+      qty: Math.round((Number(round.rejectedQty) || 0) * 1000) / 1000,
+      remark: String(round.reworkRemark || "").trim(),
+    }));
+  let status = "Waiting for vendor qty";
+  if (pendingQty > 0) status = `With QC — ${Math.round(pendingQty * 1000) / 1000}`;
+  else if (rework > 0.001) status = `Rework — ${rework}`;
+  else if (orderQty && readyQty >= orderQty - 0.001 && rounds.some((round) => round.status === "inspected"))
+    status = "Inspection complete";
+  else if (readyQty > 0) status = "Vendor can send more";
+  return {
+    readyQty,
+    percent,
+    orderQty,
+    pendingQty,
+    dispatch,
+    rejected,
+    rework,
+    reworkNotes,
+    status,
+  };
 }
 
 const showNum = (v) => (v === null || v === undefined || v === "" ? "—" : v);
@@ -2005,18 +2085,22 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
   const [open, setOpen] = useState(false);
   const [openSub, setOpenSub] = useState(null); // which main option's submenu is open
   const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [subPos, setSubPos] = useState(null);
   const btnRef = useRef(null);
   const menuRef = useRef(null);
+  const subRef = useRef(null);
 
   useEffect(() => {
     function onDocClick(e) {
       if (
         btnRef.current?.contains(e.target) ||
-        menuRef.current?.contains(e.target)
+        menuRef.current?.contains(e.target) ||
+        subRef.current?.contains(e.target)
       )
         return;
       setOpen(false);
       setOpenSub(null);
+      setSubPos(null);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -2025,9 +2109,10 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
   useEffect(() => {
     if (!open) return;
     function onScroll(e) {
-      if (menuRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target) || subRef.current?.contains(e.target)) return;
       setOpen(false);
       setOpenSub(null);
+      setSubPos(null);
     }
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll);
@@ -2048,11 +2133,39 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
     onSelect(main, sub);
     setOpen(false);
     setOpenSub(null);
+    setSubPos(null);
+  }
+
+  function placeSubmenu(main, anchor) {
+    const rect = anchor.getBoundingClientRect();
+    const menuRect = menuRef.current?.getBoundingClientRect();
+    const subW = 250;
+    const gap = 6;
+    const pad = 12;
+    const count = PROCESS_SUBOPTIONS[main]?.length || 0;
+    const estimatedH = Math.min(320, count * 32 + 12);
+    let left = (menuRect?.right ?? rect.right) + gap;
+    if (left + subW > window.innerWidth - pad) {
+      left = (menuRect?.left ?? rect.left) - subW - gap;
+    }
+    left = Math.max(pad, Math.min(left, window.innerWidth - subW - pad));
+    let top = rect.top;
+    const maxHeight = Math.max(120, Math.min(estimatedH, window.innerHeight - pad * 2));
+    if (top + maxHeight > window.innerHeight - pad) {
+      top = Math.max(pad, window.innerHeight - pad - maxHeight);
+    }
+    setSubPos({ top, left, maxHeight, width: subW });
   }
 
   function toggleSub(main, e) {
     e.stopPropagation();
-    setOpenSub((cur) => (cur === main ? null : main));
+    if (openSub === main) {
+      setOpenSub(null);
+      setSubPos(null);
+      return;
+    }
+    placeSubmenu(main, e.currentTarget);
+    setOpenSub(main);
   }
 
   function handleOpen() {
@@ -2073,6 +2186,7 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
     }
     setOpen((v) => !v);
     setOpenSub(null);
+    setSubPos(null);
   }
 
   const menu =
@@ -2085,6 +2199,7 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
           top: pos.top,
           left: pos.left,
           maxHeight: pos.maxHeight || 280,
+          overflowX: "hidden",
           overflowY: "auto",
         }}
         onMouseDown={(e) => e.stopPropagation()}
@@ -2101,19 +2216,6 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
                 <span className="jo-process-menu-label">
                   {main} <span className="jo-process-menu-arrow">▸</span>
                 </span>
-                <ul className="jo-process-submenu">
-                  {subs.map((s) => (
-                    <li
-                      key={s}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        pick(main, s);
-                      }}
-                    >
-                      {s}
-                    </li>
-                  ))}
-                </ul>
               </li>
             );
           }
@@ -2137,6 +2239,38 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
       document.body,
     );
 
+  const submenu =
+    open &&
+    openSub &&
+    subPos &&
+    PROCESS_SUBOPTIONS[openSub] &&
+    createPortal(
+      <ul
+        ref={subRef}
+        className="jo-process-submenu jo-process-submenu--portal"
+        style={{
+          top: subPos.top,
+          left: subPos.left,
+          width: subPos.width,
+          maxHeight: subPos.maxHeight,
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {PROCESS_SUBOPTIONS[openSub].map((s) => (
+          <li
+            key={s}
+            onClick={(e) => {
+              e.stopPropagation();
+              pick(openSub, s);
+            }}
+          >
+            {s}
+          </li>
+        ))}
+      </ul>,
+      document.body,
+    );
+
   return (
     <div className="jo-process-picker">
       <button
@@ -2149,9 +2283,105 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
         <span className="jo-process-caret">▾</span>
       </button>
       {menu}
+      {submenu}
     </div>
   );
 }
+/** Searchable item description: filters presets as you type; Other = free text. */
+function DescriptionCombobox({ value, options, onChange, placeholder }) {
+  const list = Array.isArray(options) ? options : [];
+  const isPreset = list.some((n) => n === value);
+  const [open, setOpen] = useState(false);
+  const [otherMode, setOtherMode] = useState(() => !!value && !isPreset);
+  const [query, setQuery] = useState(value || "");
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    const preset = list.some((n) => n === value);
+    setOtherMode(!!value && !preset);
+    setQuery(value || "");
+  }, [value, list]);
+
+  useEffect(() => {
+    function onDoc(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((n) => n.toLowerCase().includes(q));
+  }, [list, query]);
+
+  function pickPreset(name) {
+    setOtherMode(false);
+    setQuery(name);
+    onChange(name);
+    setOpen(false);
+  }
+
+  function pickOther() {
+    setOtherMode(true);
+    setQuery("");
+    onChange("");
+    setOpen(true);
+  }
+
+  return (
+    <div className="jo-desc-combo" ref={wrapRef}>
+      <input
+        type="text"
+        value={query}
+        placeholder={placeholder || "Search or type item…"}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setQuery(next);
+          setOpen(true);
+          const exact = list.find((n) => n.toLowerCase() === next.trim().toLowerCase());
+          if (exact) {
+            setOtherMode(false);
+            onChange(exact);
+          } else {
+            setOtherMode(true);
+            onChange(next);
+          }
+        }}
+        autoComplete="off"
+      />
+      {open && (
+        <div className="jo-desc-menu" role="listbox">
+          {filtered.length === 0 && !otherMode && (
+            <div className="jo-desc-empty">No matching items</div>
+          )}
+          {filtered.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className={`jo-desc-option${name === value ? " is-active" : ""}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pickPreset(name)}
+            >
+              {name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`jo-desc-option jo-desc-other${otherMode ? " is-active" : ""}`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={pickOther}
+          >
+            Other (type your own)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Shared item-row field renderer ─────────────────────────────────────────
 // Used by both the create form and EditModal so the mobile fix (stacked,
 // individually-labelled fields) only has to live in one place. Every field
@@ -2159,17 +2389,27 @@ function ProcessPicker({ value, subValue, otherValue, onSelect }) {
 // .jo-item-header row above the rows already provides column labels) and
 // shown on mobile (where that header row is hidden and rows stack to a
 // single column, so each input needs its own label to stay legible).
-function ItemRow({ it, idx, updateItem, removeItem, disableRemove }) {
+function ItemRow({ it, idx, updateItem, removeItem, disableRemove, descriptionOptions }) {
   const area = calcArea(it.perimeter, it.length);
+  const useDescList = Array.isArray(descriptionOptions) && descriptionOptions.length > 0;
   return (
     <div className="jo-item-row">
       <div className="field">
         <label>Item Description</label>
-        <input
-          value={it.description}
-          onChange={(e) => updateItem(it._key, { description: e.target.value })}
-          placeholder={`Item ${idx + 1} description`}
-        />
+        {useDescList ? (
+          <DescriptionCombobox
+            value={it.description}
+            options={descriptionOptions}
+            onChange={(description) => updateItem(it._key, { description })}
+            placeholder={`Item ${idx + 1} — search or type`}
+          />
+        ) : (
+          <input
+            value={it.description}
+            onChange={(e) => updateItem(it._key, { description: e.target.value })}
+            placeholder={`Item ${idx + 1} description`}
+          />
+        )}
       </div>
       <div className="field">
         <label>Weight/Pcs (Kg)</label>
@@ -2239,34 +2479,24 @@ function ItemRow({ it, idx, updateItem, removeItem, disableRemove }) {
       </div>
       <div className="field">
         <label>Process / RAL Code / Finish</label>
-        <ProcessPicker
-          value={it.process}
-          subValue={it.processSub}
-          otherValue={it.processOther}
-          onSelect={(main, sub) => {
-            if (main === OTHER_PROCESS) {
-              updateItem(it._key, {
-                process: OTHER_PROCESS,
-                processSub: "",
-                processOther: it.processOther,
-              });
-            } else {
-              updateItem(it._key, {
-                process: main,
-                processSub: sub,
-                processOther: "",
-              });
-            }
-          }}
+        <input
+          type="text"
+          value={
+            it.process === OTHER_PROCESS
+              ? it.processOther
+              : PROCESS_SUBOPTIONS[it.process]
+                ? it.processSub || ""
+                : it.process || ""
+          }
+          onChange={(e) =>
+            updateItem(it._key, {
+              process: e.target.value,
+              processSub: "",
+              processOther: "",
+            })
+          }
+          placeholder="Type process / RAL / finish"
         />
-        {it.process === OTHER_PROCESS && (
-          <input
-            className="field-other-input"
-            value={it.processOther}
-            onChange={(e) => updateItem(it._key, { processOther: e.target.value })}
-            placeholder="Enter process"
-          />
-        )}
       </div>
       <div className="field">
         <label>
@@ -2415,6 +2645,12 @@ function ViewModal({ order, onClose, onEdit }) {
               { label: "Send From Name", value: sendFrom.name },
               { label: "Send From Address", value: sendFrom.address },
               { label: "Vendor Name", value: detail.vendorName },
+              {
+                label: "Vendor Expected",
+                value: String(detail.vendorExpectedDate || "").trim()
+                  ? formatDate(detail.vendorExpectedDate)
+                  : "Waiting for vendor receive",
+              },
               { label: "Vehicle No", value: detail.vehicleNo || "—" },
               { label: "Issued By", value: detail.issuedBy || "—" },
               {
@@ -2600,6 +2836,60 @@ function ViewModal({ order, onClose, onEdit }) {
             </table>
           </div>
 
+          <h3
+            className="no-print"
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "1px",
+              color: "#8a8270",
+              marginBottom: 8,
+            }}
+          >
+            Vendor readiness and QC
+          </h3>
+          <p className="no-print" style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 0, marginBottom: 10 }}>
+            Ready quantity, dispatch, and rework.
+          </p>
+          <div className="tablewrap no-print" style={{ marginBottom: 20 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Material</th>
+                  <th className="num">Order qty</th>
+                  <th className="num">Vendor ready</th>
+                  <th className="num">Qty with QC</th>
+                  <th className="num">Ready to dispatch</th>
+                  <th className="num">Rework</th>
+                  <th>Rework remark</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(detail.items || []).map((it, i) => {
+                  const line = qcLine(it);
+                  return (
+                    <tr key={`qc-${i}`}>
+                      <td style={{ fontWeight: 500 }}>{it.description}</td>
+                      <td className="num">{it.qty} {it.unit || "NOS"}</td>
+                      <td className="num">{qcQtyLabel(line.readyQty, line.orderQty)}</td>
+                      <td className="num">{qcQtyLabel(line.pendingQty, line.orderQty)}</td>
+                      <td className="num">{qcQtyLabel(line.dispatch, line.orderQty)}</td>
+                      <td className="num">{qcQtyLabel(line.rework, line.orderQty)}</td>
+                      <td style={{ fontSize: 12, whiteSpace: "normal", maxWidth: 220 }}>
+                        {line.reworkNotes.length
+                          ? line.reworkNotes.map((note) => `${note.qty}: ${note.remark}`).join(" · ")
+                          : "—"}
+                      </td>
+                      <td style={{ fontSize: 12 }}>{line.status}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
           {/* Transaction history */}
           {detail.history?.length > 0 && (
             <>
@@ -2689,6 +2979,97 @@ function ViewModal({ order, onClose, onEdit }) {
   );
 }
 
+function OrderMaterials({ order }) {
+  return (
+    <div className="jo-materials">
+      <div className="jo-materials-parties">
+        <div>
+          <div className="jo-materials-kicker">Send from</div>
+          <div className="jo-materials-name">{order.sendFromName || "—"}</div>
+          <div className="jo-materials-text">{order.sendFromAddress || "—"}</div>
+        </div>
+        <div>
+          <div className="jo-materials-kicker">Delivery address</div>
+          <div className="jo-materials-name">{order.vendorName || "—"}</div>
+          <div className="jo-materials-text">{order.deliveryAddress || "—"}</div>
+        </div>
+      </div>
+      <div className="tablewrap jo-materials-scroll jo-materials-desktop">
+        <table className="jo-materials-table">
+          <colgroup>
+            <col className="jo-m-sr" />
+            <col className="jo-m-desc" />
+            <col className="jo-m-qty" />
+            <col className="jo-m-uom" />
+            <col className="jo-m-process" />
+            <col className="jo-m-project" />
+            <col className="jo-m-remark" />
+            <col className="jo-m-num" />
+            <col className="jo-m-num" />
+            <col className="jo-m-num" />
+            <col className="jo-m-num" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Sr</th>
+              <th>Item</th>
+              <th className="num">Qty</th>
+              <th>UOM</th>
+              <th>Process / RAL</th>
+              <th>Project</th>
+              <th>Remark</th>
+              <th className="num">Ready</th>
+              <th className="num">Rework</th>
+              <th className="num">Recv</th>
+              <th className="num">Avail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(order.items || []).map((it, i) => {
+              const line = qcLine(it);
+              return (
+                <tr key={i}>
+                  <td>{i + 1}</td>
+                  <td className="jo-materials-desc">{it.description}</td>
+                  <td className="num">{it.qty}</td>
+                  <td>{it.unit || "NOS"}</td>
+                  <td>{it.process || "—"}</td>
+                  <td>{it.projectName || "—"}</td>
+                  <td>{it.remark || "—"}</td>
+                  <td className="num">{qcQtyLabel(line.dispatch, line.orderQty)}</td>
+                  <td className="num">{qcQtyLabel(line.rework, line.orderQty)}</td>
+                  <td className="num">{num(it.receivedQty)}</td>
+                  <td className="num">{receivableNow(it)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="jo-materials-mobile">
+        {(order.items || []).map((it, i) => {
+          const line = qcLine(it);
+          return (
+            <div key={i} className="jo-materials-card">
+              <h4>{i + 1}. {it.description || "—"}</h4>
+              <div className="jo-materials-grid">
+                <div><span>Qty</span><strong>{it.qty} {it.unit || "NOS"}</strong></div>
+                <div><span>Process</span><strong>{it.process || "—"}</strong></div>
+                <div><span>Project</span><strong>{it.projectName || "—"}</strong></div>
+                <div><span>Ready</span><strong>{qcQtyLabel(line.dispatch, line.orderQty)}</strong></div>
+                <div><span>Rework</span><strong>{qcQtyLabel(line.rework, line.orderQty)}</strong></div>
+                <div><span>Received</span><strong>{num(it.receivedQty)}</strong></div>
+                <div><span>Can receive</span><strong>{receivableNow(it)}</strong></div>
+                {it.remark ? <div className="jo-materials-span"><span>Remark</span><strong>{it.remark}</strong></div> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ReceiveModal({ order, onSave, onClose }) {
   const { user } = useAuth();
   const [receivedBy, setReceivedBy] = useState("");
@@ -2701,9 +3082,7 @@ function ReceiveModal({ order, onSave, onClose }) {
   // qtyInputs[i]      = qty being received NOW for item i, defaulted to the remaining (pending) qty.
   // locationInputs[i] = location this item's qty is being received at (only matters when qty > 0).
   const [qtyInputs, setQtyInputs] = useState(() =>
-    (order.items || []).map((it) =>
-      Math.max(0, num(it.qty) - num(it.receivedQty)),
-    ),
+    (order.items || []).map((it) => receivableNow(it)),
   );
   const [locationInputs, setLocationInputs] = useState(() =>
     (order.items || []).map(() => LOCATIONS[0]),
@@ -2721,19 +3100,29 @@ function ReceiveModal({ order, onSave, onClose }) {
   }, []);
 
   function setQty(i, rawVal) {
-    // Clamp live so the qty received can never exceed what's actually pending
-    // for that item (order qty minus whatever's already been received).
     const it = order.items[i];
-    const remaining = Math.max(0, num(it.qty) - num(it.receivedQty));
-
-    let clamped = rawVal;
-    if (rawVal !== "") {
-      const n = num(rawVal);
-      if (n < 0) clamped = "0";
-      else if (n > remaining) clamped = String(remaining);
-      else clamped = rawVal; // keep as typed (preserves things like "12." mid-entry)
+    const allowed = receivableNow(it);
+    const dispatchQty = readyToDispatchQty(it);
+    if (rawVal === "") {
+      setErr("");
+      setQtyInputs((list) => list.map((v, idx) => (idx === i ? "" : v)));
+      return;
     }
-    setQtyInputs((list) => list.map((v, idx) => (idx === i ? clamped : v)));
+    const n = num(rawVal);
+    if (n < 0) {
+      setQtyInputs((list) => list.map((v, idx) => (idx === i ? "0" : v)));
+      return;
+    }
+    if (n > allowed + 0.0001) {
+      setErr(
+        allowed <= 0.0001
+          ? `"${it.description}": nothing is ready to dispatch, so it cannot be received.`
+          : `"${it.description}": cannot receive more than ready to dispatch (${dispatchQty}). Only ${allowed} is still left to receive.`,
+      );
+      return;
+    }
+    setErr("");
+    setQtyInputs((list) => list.map((v, idx) => (idx === i ? rawVal : v)));
   }
   function setItemLocation(i, val) {
     setLocationInputs((list) => list.map((v, idx) => (idx === i ? val : v)));
@@ -2760,6 +3149,8 @@ function ReceiveModal({ order, onSave, onClose }) {
       const it = order.items[i];
       const already = num(it.receivedQty);
       const remaining = Math.max(0, num(it.qty) - already);
+      const allowed = receivableNow(it);
+      const dispatchQty = readyToDispatchQty(it);
       const receiving = num(qtyInputs[i]);
 
       if (receiving < 0) {
@@ -2769,6 +3160,14 @@ function ReceiveModal({ order, onSave, onClose }) {
       if (receiving > remaining + 0.0001) {
         setErr(
           `"${it.description}": received qty (${receiving}) can't exceed ordered qty. Only ${remaining} of ${num(it.qty)} is still pending.`,
+        );
+        return;
+      }
+      if (receiving > allowed + 0.0001) {
+        setErr(
+          allowed <= 0.0001
+            ? `"${it.description}": nothing is ready to dispatch, so it cannot be received.`
+            : `"${it.description}": cannot receive more than ready to dispatch (${dispatchQty}). Only ${allowed} is still left to receive.`,
         );
         return;
       }
@@ -2791,8 +3190,11 @@ function ReceiveModal({ order, onSave, onClose }) {
       });
     }
     if (!anyReceiving) {
+      const canReceiveAny = order.items.some((it) => receivableNow(it) > 0.0001);
       setErr(
-        "Enter a received quantity for at least one item — you can receive part of the order now and the rest later.",
+        canReceiveAny
+          ? "Enter a received quantity for at least one item — you can receive part of the ready-to-dispatch quantity now and the rest later."
+          : "Nothing is ready to dispatch yet, so this order cannot be received.",
       );
       return;
     }
@@ -2846,11 +3248,7 @@ function ReceiveModal({ order, onSave, onClose }) {
           className="jo-modal-form"
         >
           <div className="jo-modal-body">
-            <div className="jo-receive-hint">
-              Items — enter qty received now, and where. If you choose Site,
-              type the site name. Receive date is required. Leave less than
-              the full amount to receive the rest later.
-            </div>
+            <div className="jo-receive-hint">Receive only ready-to-dispatch quantity.</div>
             <div
               style={{
                 display: "flex",
@@ -2861,84 +3259,79 @@ function ReceiveModal({ order, onSave, onClose }) {
             >
               {order.items.map((it, i) => {
                 const already = num(it.receivedQty);
-                const remaining = Math.max(0, num(it.qty) - already);
+                const dispatchQty = readyToDispatchQty(it);
+                const allowed = receivableNow(it);
                 const receiving = num(qtyInputs[i]);
                 const needsSite =
-                  locationInputs[i] === "Site" && remaining > 0 && receiving > 0;
+                  locationInputs[i] === "Site" && allowed > 0 && receiving > 0;
                 return (
                   <div key={i} className="jo-receive-row">
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>
-                        {it.description}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#8a8270" }}>
+                    <div className="jo-receive-main">
+                      <div className="jo-receive-title">{it.description}</div>
+                      <div className="jo-receive-sub">
                         Outward {it.qty} {it.unit}
                         {it.perimeter != null && it.length != null
                           ? ` · ${it.perimeter}×${it.length}mm`
                           : ""}
                       </div>
+                      <div className="jo-receive-stats">
+                        <span>Already <strong>{already}</strong></span>
+                        <span>Ready to dispatch <strong>{dispatchQty}</strong></span>
+                        <span>Can receive <strong className={allowed > 0 ? "is-open" : "is-done"}>{allowed}</strong></span>
+                      </div>
+                      {allowed <= 0 && (
+                        <div className="jo-receive-note">
+                          {dispatchQty <= 0.0001
+                            ? "Nothing is ready to dispatch yet, so location stays locked."
+                            : already >= dispatchQty - 0.0001
+                            ? "This ready-to-dispatch quantity is already received. Location stays locked until QC marks more."
+                            : "Nothing left to receive on this line."}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: 12, color: "#8a8270" }}>
-                      Already:{" "}
-                      <strong style={{ color: "var(--ink)" }}>{already}</strong>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#8a8270" }}>
-                      Pending:{" "}
-                      <strong
-                        style={{
-                          color:
-                            remaining > 0
-                              ? "var(--rust-dark)"
-                              : "var(--teal-dark)",
-                        }}
-                      >
-                        {remaining}
-                      </strong>
-                    </div>
-                    <div className="field" style={{ margin: 0 }}>
-                      <label className="jo-mobile-only-label">Qty received</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        max={remaining}
-                        value={qtyInputs[i]}
-                        onChange={(e) => setQty(i, e.target.value)}
-                        disabled={remaining <= 0}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="field" style={{ margin: 0 }}>
-                      <label className="jo-mobile-only-label">Location</label>
-                      <select
-                        value={locationInputs[i]}
-                        onChange={(e) => setItemLocation(i, e.target.value)}
-                        disabled={remaining <= 0 || receiving <= 0}
-                      >
-                        {LOCATIONS.map((l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {needsSite && (
-                      <div
-                        className="field"
-                        style={{ margin: 0, gridColumn: "1 / -1" }}
-                      >
-                        <label>
-                          Site name{" "}
-                          <span style={{ color: "var(--red)" }}>*</span>
-                        </label>
+                    <div className="jo-receive-controls">
+                      <div className="field" style={{ margin: 0 }}>
+                        <label>Qty received</label>
                         <input
-                          value={siteNames[i]}
-                          onChange={(e) => setSiteName(i, e.target.value)}
-                          placeholder="Type the site name"
-                          required
+                          type="number"
+                          min="0"
+                          step="any"
+                          max={allowed}
+                          value={qtyInputs[i]}
+                          onChange={(e) => setQty(i, e.target.value)}
+                          disabled={allowed <= 0}
+                          placeholder="0"
                         />
                       </div>
-                    )}
+                      <div className="field" style={{ margin: 0 }}>
+                        <label>Location</label>
+                        <select
+                          value={locationInputs[i]}
+                          onChange={(e) => setItemLocation(i, e.target.value)}
+                          disabled={allowed <= 0}
+                        >
+                          {LOCATIONS.map((l) => (
+                            <option key={l} value={l}>
+                              {l}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {needsSite && (
+                        <div className="field jo-receive-site" style={{ margin: 0 }}>
+                          <label>
+                            Site name{" "}
+                            <span style={{ color: "var(--red)" }}>*</span>
+                          </label>
+                          <input
+                            value={siteNames[i]}
+                            onChange={(e) => setSiteName(i, e.target.value)}
+                            placeholder="Type the site name"
+                            required
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -3019,6 +3412,10 @@ function ReceiveModal({ order, onSave, onClose }) {
 // rejected.
 function EditModal({ order, onSave, onClose }) {
   const itemsLocked = order.status !== "issued";
+  const editJobType =
+    order.jobType === "fabrication" ? "fabrication" : "powder_coating";
+  const vendors = vendorsForJobType(editJobType);
+  const descriptionOptions = FABRICATION_ITEM_DESCRIPTIONS;
 
   const [srNo, setSrNo] = useState(order.srNo || "");
   const [date, setDate] = useState((order.date || "").slice(0, 10) || todayStr());
@@ -3031,30 +3428,27 @@ function EditModal({ order, onSave, onClose }) {
   );
   const [vendorName, setVendorName] = useState(order.vendorName || "");
   const [vendorCustom, setVendorCustom] = useState(
-    () => !!order.vendorName && !VENDORS.some((v) => v.name === order.vendorName),
+    () => !!order.vendorName && !vendors.some((v) => v.name === order.vendorName),
   );
   const [vehicleNo, setVehicleNo] = useState(order.vehicleNo || "");
   const [issuedBy, setIssuedBy] = useState(order.issuedBy || "");
   const [deliveryAddress, setDeliveryAddress] = useState(order.deliveryAddress || "");
 
   const [items, setItems] = useState(() =>
-    (order.items || []).map((it) => {
-      const { process, processSub, processOther } = deriveProcessFields(it.process);
-      return {
-        _key: Math.random().toString(36).slice(2),
-        description: it.description || "",
-        weightPerPc: it.weightPerPc != null ? String(it.weightPerPc) : "",
-        perimeter: it.perimeter != null ? String(it.perimeter) : "",
-        length: it.length != null ? String(it.length) : "",
-        qty: it.qty != null ? String(it.qty) : "",
-        unit: it.unit || "NOS",
-        process,
-        processSub,
-        processOther,
-        projectName: it.projectName || "",
-        remark: it.remark || "",
-      };
-    }),
+    (order.items || []).map((it) => ({
+      _key: Math.random().toString(36).slice(2),
+      description: it.description || "",
+      weightPerPc: it.weightPerPc != null ? String(it.weightPerPc) : "",
+      perimeter: it.perimeter != null ? String(it.perimeter) : "",
+      length: it.length != null ? String(it.length) : "",
+      qty: it.qty != null ? String(it.qty) : "",
+      unit: it.unit || "NOS",
+      process: it.process || "",
+      processSub: "",
+      processOther: "",
+      projectName: it.projectName || "",
+      remark: it.remark || "",
+    })),
   );
 
   const [saving, setSaving] = useState(false);
@@ -3071,7 +3465,7 @@ function EditModal({ order, onSave, onClose }) {
     );
     setVendorName(order.vendorName || "");
     setVendorCustom(
-      !!order.vendorName && !VENDORS.some((v) => v.name === order.vendorName),
+      !!order.vendorName && !vendors.some((v) => v.name === order.vendorName),
     );
     setVehicleNo(order.vehicleNo || "");
     setIssuedBy(order.issuedBy || "");
@@ -3146,22 +3540,6 @@ function EditModal({ order, onSave, onClose }) {
           `"${invalidItem.description || "An item"}" is missing ${missing.join(", ")}. Fill it in or remove the row before saving.`,
         );
       }
-
-      const missingSubProcess = touchedItems.find(
-        (it) => PROCESS_SUBOPTIONS[it.process] && !it.processSub,
-      );
-      if (missingSubProcess)
-        return setErr(
-          `Select a ${missingSubProcess.process === "Anodizing" ? "finish" : "RAL code"} for "${missingSubProcess.description || "an item"}" (${missingSubProcess.process}).`,
-        );
-
-      const missingCustomProcess = touchedItems.find(
-        (it) => it.process === OTHER_PROCESS && !it.processOther.trim(),
-      );
-      if (missingCustomProcess)
-        return setErr(
-          `Enter a custom process for "${missingCustomProcess.description}", or pick a preset.`,
-        );
 
       payload.items = touchedItems.map((it) => ({
         description: it.description,
@@ -3329,13 +3707,13 @@ function EditModal({ order, onSave, onClose }) {
                         setVendorName("");
                       } else {
                         setVendorName(e.target.value);
-                        const found = VENDORS.find((v) => v.name === e.target.value);
+                        const found = vendors.find((v) => v.name === e.target.value);
                         if (found) setDeliveryAddress(found.address);
                       }
                     }}
                   >
                     <option value="">— Select vendor —</option>
-                    {VENDORS.map((v) => (
+                    {vendors.map((v) => (
                       <option key={v.name} value={v.name}>
                         {v.name}
                       </option>
@@ -3458,6 +3836,7 @@ function EditModal({ order, onSave, onClose }) {
                     updateItem={updateItem}
                     removeItem={removeItem}
                     disableRemove={items.length === 1}
+                    descriptionOptions={descriptionOptions}
                   />
                 ))}
 
@@ -3503,15 +3882,40 @@ function EditModal({ order, onSave, onClose }) {
   );
 }
 
+const JOB_TYPE_META = {
+  powder_coating: {
+    key: "powder_coating",
+    label: "Powder Coating",
+    listTitle: "All Powder Coating",
+    newButton: "+ New Powder Coating",
+    formTitle: "New Powder Coating / Delivery Challan",
+    createButton: "Create Powder Coating",
+    emptyNoun: "powder coating",
+  },
+  fabrication: {
+    key: "fabrication",
+    label: "Fabrication",
+    listTitle: "All Fabrication",
+    newButton: "+ New Fabrication",
+    formTitle: "New Fabrication / Delivery Challan",
+    createButton: "Create Fabrication",
+    emptyNoun: "fabrication",
+  },
+};
+
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function JobOrder() {
+export default function JobOrder({ jobType = "powder_coating" }) {
   const { user } = useAuth();
+  const meta = JOB_TYPE_META[jobType] || JOB_TYPE_META.powder_coating;
+  const resolvedJobType = meta.key;
+  const vendors = vendorsForJobType(resolvedJobType);
 
   const canCreate = CREATE_ROLES.includes(user?.role);
   const isAdmin = user?.role === "admin";
   const [orders, setOrders] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [viewOrder, setViewOrder] = useState(null);
+  const [openOrderId, setOpenOrderId] = useState(null);
   const [receiveOrder, setReceiveOrder] = useState(null);
   const [editOrder, setEditOrder] = useState(null);
   const [printOrder, setPrintOrder] = useState(null);
@@ -3554,8 +3958,9 @@ export default function JobOrder() {
   }
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const data = await apiGet("/job-orders");
+      const data = await apiGet(`/job-orders?jobType=${encodeURIComponent(resolvedJobType)}`);
       setOrders(unwrapList(data));
     } catch (err) {
       console.error("[JobOrder] failed to load job orders", err);
@@ -3563,8 +3968,15 @@ export default function JobOrder() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [resolvedJobType]);
   useEffect(() => {
+    resetForm();
+    setViewOrder(null);
+    setOpenOrderId(null);
+    setReceiveOrder(null);
+    setEditOrder(null);
+    setColFilters(EMPTY_COL_FILTERS);
+    setMsg({ text: "", ok: true });
     load();
   }, [load]);
 
@@ -3678,33 +4090,12 @@ export default function JobOrder() {
 
     const validItems = touchedItems;
 
-    const missingSubProcess = validItems.find(
-      (it) => PROCESS_SUBOPTIONS[it.process] && !it.processSub,
-    );
-    if (missingSubProcess) {
-      setMsg({
-        text: `Select a ${missingSubProcess.process === "Anodizing" ? "finish" : "RAL code"} for "${missingSubProcess.description}" (${missingSubProcess.process}).`,
-        ok: false,
-      });
-      return;
-    }
-
-    const missingCustomProcess = validItems.find(
-      (it) => it.process === OTHER_PROCESS && !it.processOther.trim(),
-    );
-    if (missingCustomProcess) {
-      setMsg({
-        text: `Enter a custom process for "${missingCustomProcess.description}", or pick a preset.`,
-        ok: false,
-      });
-      return;
-    }
-
     setSaving(true);
     try {
       await apiPost("/job-orders", {
         srNo: srNo.trim(),
         date,
+        jobType: resolvedJobType,
         sendFromName: sendFromName.trim(),
         sendFromAddress: sendFromAddress.trim(),
         vendorName: vendorName.trim(),
@@ -3734,7 +4125,7 @@ export default function JobOrder() {
           },
         ],
       });
-      setMsg({ text: `✓ Job order ${srNo} created successfully.`, ok: true });
+      setMsg({ text: `✓ ${meta.label} ${srNo} created successfully.`, ok: true });
       resetFields();
       load();
       setTimeout(() => {
@@ -3875,6 +4266,11 @@ export default function JobOrder() {
         )
           return false;
         if (
+          colFilters.vendorExpected?.length &&
+          !colFilters.vendorExpected.includes(vendorExpectedLabel(o))
+        )
+          return false;
+        if (
           colFilters.status.length &&
           !colFilters.status.includes(statusLabel(o))
         )
@@ -3896,45 +4292,52 @@ export default function JobOrder() {
     return (
       <div className="jo-order-actions">
         <button
+          type="button"
           className="btn btn-ghost btn-sm"
           onClick={() => setViewOrder(order)}
+          title="View"
         >
-          👁 View
+          View
         </button>
         {canCreate && (
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => setEditOrder(order)}
+            title="Edit"
           >
-            ✎ Edit
+            Edit
           </button>
         )}
         {isAdmin && (
           <button
-            className="btn btn-ghost btn-sm"
+            type="button"
+            className="btn btn-ghost btn-sm btn-icon"
             style={{ color: "var(--red)" }}
             onClick={() => handleDelete(order)}
             title="Delete job order"
+            aria-label="Delete"
           >
             🗑
           </button>
         )}
         {hasPending && canCreate && (
           <button
+            type="button"
             className="btn btn-sm btn-in"
             onClick={() => setReceiveOrder(order)}
+            title={order.status === "partial" ? "Continue receiving" : "Mark received"}
           >
-            ✓{" "}
-            {order.status === "partial"
-              ? "Continue receiving"
-              : "Received"}
+            {order.status === "partial" ? "Receive" : "Received"}
           </button>
         )}
         <button
+          type="button"
           className="btn btn-ghost btn-sm"
           onClick={() => handlePrintPdf(order)}
+          title="Download PDF"
         >
-          ⬇ PDF
+          PDF
         </button>
       </div>
     );
@@ -4010,6 +4413,50 @@ export default function JobOrder() {
         .jo-item-row .field select:disabled { background: var(--paper-dim); cursor: not-allowed; }
         .jo-item-row .field-other-input { margin-top: 6px; }
 
+        .jo-desc-combo { position: relative; width: 100%; }
+        .jo-desc-combo input { width: 100%; }
+        .jo-desc-menu {
+          position: absolute;
+          z-index: 40;
+          left: 0;
+          right: 0;
+          top: calc(100% + 4px);
+          max-height: 220px;
+          overflow-y: auto;
+          background: #fff;
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          box-shadow: 0 8px 24px rgba(28, 26, 22, 0.12);
+          padding: 4px;
+        }
+        .jo-desc-option {
+          display: block;
+          width: 100%;
+          text-align: left;
+          border: none;
+          background: transparent;
+          padding: 7px 10px;
+          font-size: 13px;
+          font-family: inherit;
+          color: var(--ink);
+          border-radius: 6px;
+          cursor: pointer;
+        }
+        .jo-desc-option:hover,
+        .jo-desc-option.is-active { background: var(--paper-dim); }
+        .jo-desc-other {
+          border-top: 1px solid var(--line);
+          margin-top: 4px;
+          padding-top: 10px;
+          font-weight: 600;
+          color: var(--teal-dark, #0f5c5c);
+        }
+        .jo-desc-empty {
+          padding: 8px 10px;
+          font-size: 12px;
+          color: var(--text-3);
+        }
+
         .jo-item-remove {
           height: 32px; width: 32px; border-radius: 6px; border: 1px solid var(--line);
           background: transparent; cursor: pointer; color: var(--red); font-size: 14px;
@@ -4019,7 +4466,7 @@ export default function JobOrder() {
         .jo-item-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 
         /* Tablet / small laptop: 2-col grid — hide header, show per-field labels */
-        @media (max-width: 1400px) {
+        @media (max-width: 1279px) {
           .jo-item-row {
             grid-template-columns: 1fr 1fr;
           }
@@ -4073,6 +4520,7 @@ export default function JobOrder() {
   z-index: 12000;
   min-width: 240px;
   max-height: min(280px, calc(100vh - 24px));
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -4085,35 +4533,188 @@ export default function JobOrder() {
 .jo-process-menu-label { display: flex; align-items: center; gap: 6px; width: 100%; justify-content: space-between; }
 .jo-process-menu-arrow { font-size: 10px; color: #8a8270; }
 
-.jo-process-submenu {
-  display: none; position: absolute; left: 100%; top: -4px; z-index: 60;
+.jo-process-submenu--portal {
+  position: fixed;
+  z-index: 12001;
   min-width: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: #fff; border: 1px solid var(--line); border-radius: 6px;
   box-shadow: var(--shadow-lg); list-style: none; margin: 0; padding: 4px 0;
 }
-.jo-process-menu--portal .jo-process-submenu {
-  z-index: 12001;
-}
-.jo-process-menu-item.has-sub.is-open > .jo-process-submenu { display: block; }
-.jo-process-submenu li { padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
-.jo-process-submenu li:hover { background: var(--paper-dim); }
+.jo-process-submenu--portal li { padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.jo-process-submenu--portal li:hover { background: var(--paper-dim); }
 
-        /* ── Receive-modal per-item row (unrelated grid, same mobile fix) ── */
+        /* ── Receive-modal per-item row ── */
         .jo-receive-row {
           display: grid;
-          grid-template-columns: 2fr 0.7fr 0.7fr 0.7fr 1fr;
-          gap: 8px;
-          align-items: center;
-          padding: 8px 10px;
+          grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.9fr);
+          gap: 12px 16px;
+          align-items: start;
+          padding: 12px;
           border: 1px solid var(--line);
           border-radius: 8px;
+          overflow: visible;
         }
-        @media (max-width: 640px) {
-          .jo-receive-row { grid-template-columns: 1fr; }
+        .jo-receive-main { min-width: 0; }
+        .jo-receive-title { font-weight: 600; font-size: 13px; }
+        .jo-receive-sub { font-size: 11px; color: #8a8270; margin-top: 2px; }
+        .jo-receive-stats {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          margin-top: 8px;
+          font-size: 12px;
+          color: #8a8270;
         }
+        .jo-receive-stats strong { color: var(--ink); }
+        .jo-receive-stats strong.is-open { color: var(--rust-dark); }
+        .jo-receive-stats strong.is-done { color: var(--teal-dark); }
+        .jo-receive-note {
+          margin-top: 8px;
+          font-size: 12px;
+          color: #9a3412;
+          line-height: 1.35;
+        }
+        .jo-receive-controls {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          min-width: 0;
+          position: relative;
+          z-index: 1;
+        }
+        .jo-receive-controls .field label {
+          display: block;
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--text-3);
+          margin-bottom: 3px;
+        }
+        .jo-receive-controls input,
+        .jo-receive-controls select {
+          width: 100%;
+          box-sizing: border-box;
+          min-height: 34px;
+          pointer-events: auto;
+        }
+        .jo-receive-controls select:disabled,
+        .jo-receive-controls input:disabled {
+          background: var(--paper-dim);
+          color: var(--text-3);
+          cursor: not-allowed;
+        }
+        .jo-receive-site { grid-column: 1 / -1; }
         .jo-mobile-only-label { display: none; font-size: 11px; font-weight: 600; color: var(--text-3); margin-bottom: 3px; }
-        @media (max-width: 640px) {
-          .jo-mobile-only-label { display: block; }
+
+        .jo-materials { padding: 0 2px 8px; }
+        .jo-materials-parties {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px 16px;
+          margin: 4px 0 8px;
+        }
+        .jo-materials-kicker {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          color: #8a8270;
+          margin-bottom: 2px;
+        }
+        .jo-materials-name { font-weight: 700; font-size: 12.5px; margin-bottom: 2px; line-height: 1.25; }
+        .jo-materials-text {
+          font-size: 12px;
+          line-height: 1.35;
+          white-space: pre-line;
+          color: var(--text-2);
+          word-break: break-word;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .jo-materials-scroll {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+        }
+        .jo-materials-table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+        .jo-materials-table th,
+        .jo-materials-table td {
+          vertical-align: middle;
+          text-align: left;
+          padding: 5px 6px;
+          border-bottom: 1px solid var(--line);
+          font-size: 12px;
+          line-height: 1.3;
+          white-space: normal;
+          word-break: break-word;
+        }
+        .jo-materials-table th {
+          font-size: 9.5px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          color: #8a8270;
+          background: var(--paper-dim);
+          white-space: normal;
+          line-height: 1.2;
+        }
+        .jo-materials-table td.num,
+        .jo-materials-table th.num {
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap;
+        }
+        .jo-materials-table col.jo-m-sr { width: 32px; }
+        .jo-materials-table col.jo-m-desc { width: 16%; }
+        .jo-materials-table col.jo-m-qty { width: 52px; }
+        .jo-materials-table col.jo-m-uom { width: 44px; }
+        .jo-materials-table col.jo-m-process { width: 14%; }
+        .jo-materials-table col.jo-m-project { width: 10%; }
+        .jo-materials-table col.jo-m-remark { width: 9%; }
+        .jo-materials-table col.jo-m-num { width: 72px; }
+        .jo-materials-desc { font-weight: 500; }
+        .jo-materials-mobile { display: none; flex-direction: column; gap: 8px; }
+        .jo-materials-card {
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          padding: 10px 12px;
+          background: var(--paper-dim);
+        }
+        .jo-materials-card h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; }
+        .jo-materials-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 6px 10px;
+          font-size: 12px;
+        }
+        .jo-materials-grid span { display: block; font-size: 10px; color: var(--text-3); margin-bottom: 1px; }
+        .jo-materials-grid strong { font-weight: 600; color: var(--ink); word-break: break-word; }
+        .jo-materials-span { grid-column: 1 / -1; }
+
+        @media (max-width: 1100px) {
+          .jo-materials-table col.jo-m-remark,
+          .jo-materials-table th:nth-child(7),
+          .jo-materials-table td:nth-child(7) { display: none; }
+        }
+
+        @media (max-width: 900px) {
+          .jo-receive-row { grid-template-columns: 1fr; }
+          .jo-receive-controls { grid-template-columns: 1fr; }
+          .jo-materials-parties { grid-template-columns: 1fr; }
+          .jo-materials-desktop { display: none !important; }
+          .jo-materials-mobile { display: flex; }
+        }
+
+        @media (max-width: 480px) {
+          .jo-materials-grid { grid-template-columns: 1fr; }
         }
 
         /* ── Page layout ─────────────────────────────────────────────────── */
@@ -4129,8 +4730,8 @@ export default function JobOrder() {
           align-items: center;
           justify-content: space-between;
           flex-wrap: wrap;
-          gap: 10px;
-          margin-bottom: 16px;
+          gap: 8px;
+          margin-bottom: 10px;
         }
         .jo-status-filters {
           display: flex;
@@ -4149,16 +4750,96 @@ export default function JobOrder() {
         }
         .jo-vendor-custom-row input { flex: 1; min-width: 0; }
 
-        /* ── Orders table (horizontal scroll on narrow screens) ──────────── */
+        /* ── Orders table ────────────────────────────────────────────────── */
         .jo-orders-wrap {
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
         }
-        .jo-orders-table { min-width: 900px; width: 100%; }
+        .jo-orders-table { width: 100%; min-width: 0; }
+        .jo-orders-table th {
+          padding: 6px 8px;
+          font-size: 9.5px;
+          line-height: 1.2;
+        }
+        .jo-orders-table td {
+          padding: 6px 8px;
+          font-size: 12px;
+          line-height: 1.3;
+          vertical-align: middle;
+        }
         .jo-order-actions {
           display: flex;
-          gap: 6px;
+          gap: 4px;
           flex-wrap: wrap;
+          align-items: center;
+          max-width: 280px;
+        }
+        .jo-order-actions .btn {
+          height: 28px;
+          padding: 0 8px;
+          font-size: 11px;
+          white-space: nowrap;
+          flex-shrink: 0;
+          box-sizing: border-box;
+        }
+        .jo-order-actions .btn-icon {
+          width: 28px;
+          padding: 0;
+          justify-content: center;
+        }
+        .jo-detail-cell {
+          background: #fff;
+          padding: 4px 8px 2px !important;
+        }
+        .jo-orders-mobile { display: none; flex-direction: column; gap: 10px; }
+        .jo-order-card {
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          background: #fff;
+          overflow: hidden;
+        }
+        .jo-order-card-head {
+          width: 100%;
+          text-align: left;
+          background: #fff;
+          border: none;
+          padding: 12px 14px;
+          cursor: pointer;
+          font-family: inherit;
+          color: inherit;
+        }
+        .jo-order-card-head.is-open { background: var(--paper-dim); }
+        .jo-order-card-title {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+        .jo-order-card-title strong { font-size: 15px; font-weight: 700; }
+        .jo-order-card-meta {
+          font-size: 12px;
+          color: var(--text-2);
+          line-height: 1.4;
+        }
+        .jo-order-card-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          padding: 0 12px 12px;
+        }
+        .jo-order-card-actions .btn {
+          height: 32px;
+          padding: 0 10px;
+          font-size: 12px;
+          flex: 1 1 auto;
+          justify-content: center;
+          box-sizing: border-box;
+        }
+        .jo-order-card-detail {
+          padding: 0 12px 12px;
+          border-top: 1px solid var(--line);
+          background: #fff;
         }
 
         /* ── Modals ─────────────────────────────────────────────────────── */
@@ -4259,6 +4940,11 @@ export default function JobOrder() {
           line-height: 1.4;
         }
 
+        @media (max-width: 1100px) {
+          .jo-col-secondary { display: none !important; }
+          .jo-order-actions { max-width: 220px; }
+        }
+
         @media (max-width: 900px) {
           .jo-status-filters { width: 100%; }
           .jo-status-filters .btn {
@@ -4266,17 +4952,32 @@ export default function JobOrder() {
             min-width: 0;
             justify-content: center;
           }
+          .jo-col-tablet-hide { display: none !important; }
+          .jo-orders-desktop { display: none !important; }
+          .jo-orders-mobile { display: flex; }
+          .jo-order-card-actions .jo-order-actions {
+            max-width: none;
+            width: 100%;
+          }
+          .jo-list-head { align-items: flex-start; }
+          .jo-list-head .btn { flex-shrink: 0; }
         }
 
         @media (max-width: 768px) {
           .jo-modal-overlay {
             padding: 12px;
             align-items: flex-start;
+            overflow-y: auto;
           }
           .jo-modal-panel {
             max-height: calc(100vh - 24px);
+            overflow: hidden;
           }
-          .jo-modal-header { padding: 14px 16px; }
+          .jo-modal-header {
+            padding: 14px 16px;
+            flex-wrap: wrap;
+          }
+          .jo-modal-actions { flex-wrap: wrap; }
           .jo-modal-body { padding: 14px 16px; }
           .jo-meta-grid { grid-template-columns: 1fr 1fr; }
           .jo-form-card-head { flex-wrap: wrap; }
@@ -4302,6 +5003,7 @@ export default function JobOrder() {
             align-items: stretch;
           }
           .jo-items-toolbar button { width: 100%; justify-content: center; }
+          .jo-order-card-actions .btn { flex: 1 1 100%; }
         }
       `}</style>
 
@@ -4349,16 +5051,13 @@ export default function JobOrder() {
 
       <div className="pagehead">
         <div className="pagehead-text">
-          <h2>Job Orders / Delivery Challan</h2>
-          <p>
-            Create and track delivery challans for goods sent out for work and
-            received back.
-          </p>
+          <h2>{meta.label}</h2>
+          <p>Track challans sent for work and received back.</p>
         </div>
         <div className="no-print">
           {!showForm && canCreate && (
             <button className="btn btn-in" onClick={() => setShowForm(true)}>
-              + New Job Order
+              {meta.newButton}
             </button>
           )}
         </div>
@@ -4368,7 +5067,7 @@ export default function JobOrder() {
       {showForm && canCreate && (
         <div className="card no-print">
           <div className="jo-form-card-head">
-            <h3 style={{ margin: 0 }}>New Job Order / Delivery Challan</h3>
+            <h3 style={{ margin: 0 }}>{meta.formTitle}</h3>
             <button className="btn btn-ghost btn-sm" onClick={resetForm}>
               ✕ Cancel
             </button>
@@ -4491,7 +5190,7 @@ export default function JobOrder() {
                         setDeliveryAddress("");
                       } else {
                         setVendorName(e.target.value);
-                        const found = VENDORS.find(
+                        const found = vendors.find(
                           (v) => v.name === e.target.value,
                         );
                         if (found) setDeliveryAddress(found.address);
@@ -4500,7 +5199,7 @@ export default function JobOrder() {
                     }}
                   >
                     <option value="">— Select vendor —</option>
-                    {VENDORS.map((v) => (
+                    {vendors.map((v) => (
                       <option key={v.name} value={v.name}>
                         {v.name}
                       </option>
@@ -4588,6 +5287,7 @@ export default function JobOrder() {
                 updateItem={updateItem}
                 removeItem={removeItem}
                 disableRemove={items.length === 1}
+                descriptionOptions={FABRICATION_ITEM_DESCRIPTIONS}
               />
             ))}
 
@@ -4602,7 +5302,7 @@ export default function JobOrder() {
 
             <div className="actionrow">
               <button className="btn btn-in" type="submit" disabled={saving}>
-                {saving ? "Saving…" : "Create Job Order"}
+                {saving ? "Saving…" : meta.createButton}
               </button>
               <button
                 type="button"
@@ -4621,12 +5321,19 @@ export default function JobOrder() {
         </div>
       )}
 
+      {isAdmin && <VendorQc embedded jobType={resolvedJobType} onUpdated={load} />}
+
       {/* ── Orders list ── */}
       <div className="card card-wide no-print">
         <div className="jo-list-head">
-          <h3 style={{ margin: 0 }}>
-            All Job Orders <span className="pill-count">{visible.length}</span>
-          </h3>
+          <div>
+            <h3 style={{ margin: 0 }}>
+              {meta.listTitle} <span className="pill-count">{visible.length}</span>
+            </h3>
+            <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "var(--text-2)" }}>
+              Click a challan for material details.
+            </p>
+          </div>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -4640,7 +5347,8 @@ export default function JobOrder() {
         {loading ? (
           <p style={{ color: "var(--text-3)", fontSize: 13 }}>Loading…</p>
         ) : (
-          <div className="tablewrap jo-orders-wrap">
+          <>
+          <div className="tablewrap jo-orders-wrap jo-orders-desktop">
             <table className="jo-orders-table">
               <thead
                 style={{
@@ -4675,7 +5383,7 @@ export default function JobOrder() {
                       />
                     </span>
                   </th>
-                  <th>
+                  <th className="jo-col-tablet-hide">
                     <span className="jo-th-filter">
                       Send From{" "}
                       <ColFilter
@@ -4699,7 +5407,7 @@ export default function JobOrder() {
                       />
                     </span>
                   </th>
-                  <th>
+                  <th className="jo-col-secondary">
                     <span className="jo-th-filter">
                       Vehicle No{" "}
                       <ColFilter
@@ -4711,7 +5419,7 @@ export default function JobOrder() {
                       />
                     </span>
                   </th>
-                  <th>
+                  <th className="jo-col-secondary">
                     <span className="jo-th-filter">
                       Issued By{" "}
                       <ColFilter
@@ -4723,7 +5431,7 @@ export default function JobOrder() {
                       />
                     </span>
                   </th>
-                  <th className="num">
+                  <th className="num jo-col-tablet-hide">
                     <span className="jo-th-filter">
                       Dispatched Qty{" "}
                       <ColFilter
@@ -4737,7 +5445,7 @@ export default function JobOrder() {
                       />
                     </span>
                   </th>
-                  <th className="num">
+                  <th className="num jo-col-tablet-hide">
                     <span className="jo-th-filter">
                       Received Qty{" "}
                       <ColFilter
@@ -4749,6 +5457,19 @@ export default function JobOrder() {
                       />
                     </span>
                   </th>
+                  <th className="jo-col-secondary">
+                    <span className="jo-th-filter">
+                      Vendor Expected{" "}
+                      <ColFilter
+                        values={orders.map((o) => vendorExpectedLabel(o))}
+                        selected={colFilters.vendorExpected}
+                        onChange={(v) =>
+                          setColFilters((f) => ({ ...f, vendorExpected: v }))
+                        }
+                      />
+                    </span>
+                  </th>
+                  <th className="jo-col-tablet-hide">Vendor / QC</th>
                   <th>
                     <span className="jo-th-filter">
                       Status{" "}
@@ -4776,18 +5497,31 @@ export default function JobOrder() {
                     0,
                   );
                   const hasPending = pendingTotal > 0.0001;
+                  const open = openOrderId === order._id;
                   return (
-                    <tr key={order._id}>
+                    <Fragment key={order._id}>
+                    <tr
+                      onClick={() => setOpenOrderId(open ? null : order._id)}
+                      style={{ cursor: "pointer", background: open ? "var(--paper-dim)" : undefined }}
+                    >
                       <td className="mono" style={{ fontWeight: 700 }}>
-                        {order.srNo}
+                        {open ? "▾ " : "▸ "}{order.srNo}
                       </td>
                       <td>{formatDate(order.date)}</td>
-                      <td>{order.sendFromName || "—"}</td>
+                      <td className="jo-col-tablet-hide">{order.sendFromName || "—"}</td>
                       <td style={{ fontWeight: 500 }}>{order.vendorName}</td>
-                      <td>{order.vehicleNo || "—"}</td>
-                      <td>{order.issuedBy || "—"}</td>
-                      <td className="num">{dispatchedQty}</td>
-                      <td className="num">{receivedQtyTotal}</td>
+                      <td className="jo-col-secondary">{order.vehicleNo || "—"}</td>
+                      <td className="jo-col-secondary">{order.issuedBy || "—"}</td>
+                      <td className="num jo-col-tablet-hide">{dispatchedQty}</td>
+                      <td className="num jo-col-tablet-hide">{receivedQtyTotal}</td>
+                      <td className="jo-col-secondary">
+                        {String(order.vendorExpectedDate || "").trim()
+                          ? formatDate(order.vendorExpectedDate)
+                          : <span style={{ color: "var(--text-3)" }}>—</span>}
+                      </td>
+                      <td className="jo-col-tablet-hide" style={{ fontSize: 12, color: "var(--text-2)", maxWidth: 220 }}>
+                        {qcSummary(order)}
+                      </td>
                       <td>
                         <span
                           style={{
@@ -4803,18 +5537,85 @@ export default function JobOrder() {
                           {statusLabel(order)}
                         </span>
                       </td>
-                      <td>
+                      <td onClick={(e) => e.stopPropagation()}>
                         <OrderActionButtons
                           order={order}
                           hasPending={hasPending}
                         />
                       </td>
                     </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={12} className="jo-detail-cell">
+                          <OrderMaterials order={order} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          <div className="jo-orders-mobile">
+            {pageItems.map((order) => {
+              const sc = STATUS_COLORS[order.status] || STATUS_COLORS.issued;
+              const pendingTotal = (order.items || []).reduce(
+                (sum, it) =>
+                  sum + Math.max(0, num(it.qty) - num(it.receivedQty)),
+                0,
+              );
+              const hasPending = pendingTotal > 0.0001;
+              const open = openOrderId === order._id;
+              return (
+                <div key={order._id} className="jo-order-card">
+                  <button
+                    type="button"
+                    className={`jo-order-card-head${open ? " is-open" : ""}`}
+                    onClick={() => setOpenOrderId(open ? null : order._id)}
+                  >
+                    <div className="jo-order-card-title">
+                      <strong>{open ? "▾ " : "▸ "}Challan {order.srNo}</strong>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "3px 10px",
+                          borderRadius: 12,
+                          background: sc.bg,
+                          color: sc.color,
+                          textTransform: "capitalize",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {statusLabel(order)}
+                      </span>
+                    </div>
+                    <div className="jo-order-card-meta">
+                      {formatDate(order.date)} · {order.vendorName || "—"}
+                      <br />
+                      Disp {orderDispatchedQty(order)} · Recv {orderReceivedQty(order)}
+                      {String(order.vendorExpectedDate || "").trim()
+                        ? ` · Expected ${formatDate(order.vendorExpectedDate)}`
+                        : ""}
+                    </div>
+                    <div className="jo-order-card-meta" style={{ marginTop: 4 }}>
+                      {qcSummary(order)}
+                    </div>
+                  </button>
+                  <div className="jo-order-card-actions" onClick={(e) => e.stopPropagation()}>
+                    <OrderActionButtons order={order} hasPending={hasPending} />
+                  </div>
+                  {open && (
+                    <div className="jo-order-card-detail">
+                      <OrderMaterials order={order} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
         {!loading && (
           <Pagination
@@ -4828,11 +5629,11 @@ export default function JobOrder() {
         {!loading && !visible.length && (
           <div className="empty">
             {hasActiveFilters
-              ? "No job orders match these filters."
-              : "No job orders yet."}
+              ? `No ${meta.emptyNoun} challans match these filters.`
+              : `No ${meta.emptyNoun} challans yet.`}
             {!hasActiveFilters && (
               <p>
-                Click <strong>+ New Job Order</strong> above to create your first
+                Click <strong>{meta.newButton}</strong> above to create your first
                 delivery challan.
               </p>
             )}

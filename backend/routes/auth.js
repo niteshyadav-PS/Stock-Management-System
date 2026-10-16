@@ -16,12 +16,32 @@ router.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: 'Incorrect username or password' });
 
+    const vendorJobType =
+      user.role === 'vendor'
+        ? (user.vendorJobType === 'fabrication' ? 'fabrication' : 'powder_coating')
+        : '';
     const token = jwt.sign(
-      { id: user._id, username: user.username, name: user.name, role: user.role },
+      {
+        id: user._id,
+        username: user.username,
+        name: user.name,
+        role: user.role,
+        vendorName: user.vendorName || '',
+        vendorJobType,
+      },
       process.env.JWT_SECRET,
       { expiresIn: '12h' }
     );
-    res.json({ token, user: { name: user.name, username: user.username, role: user.role } });
+    res.json({
+      token,
+      user: {
+        name: user.name,
+        username: user.username,
+        role: user.role,
+        vendorName: user.vendorName || '',
+        vendorJobType,
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

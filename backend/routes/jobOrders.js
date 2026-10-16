@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const mongoose = require("mongoose");
 const JobOrder = require("../models/JobOrder");
+const User = require("../models/User");
 const { authMiddleware, requireRole } = require("../middleware/auth");
 const { parsePagination, paginateQuery } = require("../utils/paginate");
 
@@ -64,12 +65,132 @@ function parseCalendarDate(value) {
   return s;
 }
 
+function sameVendor(a, b) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const JOB_TYPES = JobOrder.JOB_TYPES || ["powder_coating", "fabrication"];
+
+function normalizeJobType(value) {
+  const t = String(value || "").trim();
+  return JOB_TYPES.includes(t) ? t : "";
+}
+
+/** Optional ?jobType=powder_coating|fabrication. Legacy docs without jobType count as powder_coating. */
+function jobTypeFilter(jobType) {
+  const t = normalizeJobType(jobType);
+  if (!t) return {};
+  if (t === "fabrication") return { jobType: "fabrication" };
+  return {
+    $or: [
+      { jobType: "powder_coating" },
+      { jobType: { $exists: false } },
+      { jobType: null },
+      { jobType: "" },
+    ],
+  };
+}
+
+function mergeFilters(...parts) {
+  const clean = parts.filter((p) => p && Object.keys(p).length > 0);
+  if (!clean.length) return {};
+  if (clean.length === 1) return clean[0];
+  return { $and: clean };
+}
+
+// Vendor logins are scoped to one company and one job type (powder / fabrication).
+// Values are read from the user record so an admin change applies on the next request.
+async function vendorFilter(req) {
+  if (req.user?.role !== "vendor") return {};
+  const user = await User.findById(req.user.id).select("vendorName vendorJobType").lean();
+  const name = String(user?.vendorName || "").trim();
+  if (!name) return { _id: null };
+  const jobType =
+    user?.vendorJobType === "fabrication" ? "fabrication" : "powder_coating";
+  return mergeFilters(
+    { vendorName: new RegExp(`^${escapeRegExp(name)}$`, "i") },
+    jobTypeFilter(jobType),
+  );
+}
+
+async function loadVendorUser(req) {
+  if (req.user?.role !== "vendor") return null;
+  return User.findById(req.user.id).select("vendorName vendorJobType").lean();
+}
+
+function vendorOwnsOrder(user, order) {
+  if (!user) return false;
+  if (!sameVendor(user.vendorName, order.vendorName)) return false;
+  const userType =
+    user.vendorJobType === "fabrication" ? "fabrication" : "powder_coating";
+  const orderType =
+    order.jobType === "fabrication" ? "fabrication" : "powder_coating";
+  return userType === orderType;
+}
+
+function roundQty(n) {
+  return Math.round(Number(n) * 1000) / 1000;
+}
+
+function latestReadyPercent(item) {
+  const fromRounds = (item?.qcRounds || []).reduce(
+    (max, round) => Math.max(max, Number(round.readyPercent) || 0),
+    0,
+  );
+  return Math.max(fromRounds, Number(item?.readyPercent) || 0);
+}
+
+function submittedReadyQty(item) {
+  return roundQty(
+    (item?.qcRounds || []).reduce((sum, round) => {
+      if (round.origin === "rework") return sum;
+      return sum + (Number(round.readyQty) || 0);
+    }, 0),
+  );
+}
+
+function reworkQty(item) {
+  const rejected = (item?.qcRounds || []).reduce((sum, round) => {
+    if (round.status !== "inspected") return sum;
+    return sum + (Number(round.rejectedQty) || 0);
+  }, 0);
+  const sentBack = (item?.qcRounds || []).reduce((sum, round) => {
+    if (round.origin !== "rework") return sum;
+    return sum + (Number(round.readyQty) || 0);
+  }, 0);
+  return roundQty(Math.max(0, rejected - sentBack));
+}
+
+function readyToDispatchQty(item) {
+  return roundQty(
+    (item?.qcRounds || []).reduce((sum, round) => {
+      if (round.status !== "inspected") return sum;
+      return sum + (Number(round.dispatchQty) || 0);
+    }, 0),
+  );
+}
+
+function receivableNow(item) {
+  const dispatchLeft = Math.max(0, readyToDispatchQty(item) - num(item?.receivedQty));
+  const orderLeft = Math.max(0, num(item?.qty) - num(item?.receivedQty));
+  return roundQty(Math.min(dispatchLeft, orderLeft));
+}
+
 // ── GET /api/job-orders ───────────────────────────────────────────────────────
 // Optional ?page=&limit= → { items, total, page, limit }; otherwise full array.
+// Vendor role only receives orders issued to their own company.
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
-    const result = await paginateQuery(JobOrder, {}, {
+    const filter = mergeFilters(
+      await vendorFilter(req),
+      jobTypeFilter(req.query.jobType),
+    );
+    const result = await paginateQuery(JobOrder, filter, {
       sort: { createdAt: -1 },
       pagination,
     });
@@ -85,6 +206,11 @@ router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const order = await JobOrder.findById(req.params.id).lean();
     if (!order) return res.status(404).json({ error: "Job order not found." });
+    if (req.user?.role === "vendor") {
+      const vendorUser = await loadVendorUser(req);
+      if (!vendorOwnsOrder(vendorUser, order))
+        return res.status(404).json({ error: "Job order not found." });
+    }
     res.json(order);
   } catch (err) {
     console.error("[job-orders GET /:id] ", err);
@@ -102,6 +228,7 @@ router.post(
       const {
         srNo,
         date,
+        jobType,
         sendFromName,
         sendFromAddress,
         vendorName,
@@ -122,6 +249,8 @@ router.post(
         return res
           .status(400)
           .json({ error: "At least one item is required." });
+
+      const resolvedJobType = normalizeJobType(jobType) || "powder_coating";
 
       const cleanItems = [];
       const skipped = []; // descriptions of rows dropped for missing required fields, for a clearer error message
@@ -153,6 +282,8 @@ router.post(
           projectName,
           // ralCode: it.ralCode || "",
           remark: it.remark || "",
+          readyPercent: 0,
+          qcRounds: [],
         });
       }
 
@@ -180,6 +311,7 @@ router.post(
       const order = await JobOrder.create({
         srNo: String(srNo).trim(),
         date: date || new Date().toISOString().slice(0, 10),
+        jobType: resolvedJobType,
         sendFromName: String(sendFromName ?? "").trim(),
         sendFromAddress: String(sendFromAddress ?? "").trim(),
         vendorName: vendorName.trim(),
@@ -193,7 +325,7 @@ router.post(
           {
             action: "issued",
             by: req.user.name || req.user.username,
-            note: `Issued to ${vendorName.trim()}`,
+            note: `Issued to ${vendorName.trim()} (${resolvedJobType === "fabrication" ? "Fabrication" : "Powder Coating"})`,
             at: new Date(),
           },
         ],
@@ -313,6 +445,9 @@ router.patch(
           const perimeter = toNumOrNull(it.perimeter);
           const length = toNumOrNull(it.length);
           const area = calcArea(perimeter, length);
+          const prev = order.items[cleanItems.length];
+          const keepQc =
+            prev && String(prev.description || "").trim() === description;
           cleanItems.push({
             description,
             weightPerPc,
@@ -327,6 +462,8 @@ router.patch(
             remark: it.remark || "",
             receivedQty: 0,
             receipts: [],
+            readyPercent: keepQc ? latestReadyPercent(prev) : 0,
+            qcRounds: keepQc ? (prev.qcRounds || []).map((round) => ({ ...round.toObject?.() || round })) : [],
           });
         }
         if (!cleanItems.length)
@@ -422,12 +559,20 @@ router.patch(
         if (receiving <= 0) continue; // this item is being left pending — fine, that's partial receiving
 
         const remaining = Math.max(0, num(it.qty) - num(it.receivedQty));
+        const dispatchQty = readyToDispatchQty(it);
+        const allowed = receivableNow(it);
         if (receiving > remaining + 0.0001)
           return res
             .status(400)
             .json({
               error: `"${it.description}": can't receive ${receiving}, only ${remaining} pending.`,
             });
+        if (receiving > allowed + 0.0001)
+          return res.status(400).json({
+            error: allowed <= 0.0001
+              ? `"${it.description}": nothing is ready to dispatch, so it cannot be received.`
+              : `"${it.description}": cannot receive more than ready to dispatch (${dispatchQty}). Only ${allowed} is still left to receive.`,
+          });
         const location = resolveReceiveLocation(entry);
         if (location.error)
           return res
@@ -543,5 +688,242 @@ router.delete(
     }
   },
 );
+
+// ── PATCH /api/job-orders/:id/vendor-ack ──────────────────────────────────────
+// Vendor confirms materials arrived and sets the expected ready date.
+router.patch("/:id/vendor-ack", authMiddleware, async (req, res) => {
+  try {
+    const role = req.user?.role;
+    if (role !== "vendor" && role !== "admin")
+      return res.status(403).json({ error: "Only the vendor team or an admin can receive this challan." });
+
+    const order = await JobOrder.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: "Job order not found." });
+
+    if (role === "vendor") {
+      const vendorUser = await loadVendorUser(req);
+      if (!vendorOwnsOrder(vendorUser, order))
+        return res.status(404).json({ error: "Job order not found." });
+    }
+
+    if (order.vendorExpectedDate)
+      return res.status(400).json({ error: "This challan is already received by the vendor." });
+
+    const expectedDate = parseCalendarDate(req.body?.expectedDate);
+    if (!expectedDate)
+      return res.status(400).json({ error: "Expected date is compulsory." });
+
+    const who = req.user.name || req.user.username;
+    const note = String(req.body?.note || "").trim();
+    order.vendorExpectedDate = expectedDate;
+    order.vendorAckBy = who;
+    order.vendorAckAt = new Date();
+    order.vendorAckNote = note;
+    order.history.push({
+      action: "vendor-ack",
+      by: who,
+      note:
+        `Vendor received challan. Expected date: ${expectedDate.split("-").reverse().join("/")}` +
+        (note ? ` — ${note}` : ""),
+      at: new Date(),
+    });
+    await order.save();
+    res.json(await JobOrder.findById(order._id).lean());
+  } catch (err) {
+    console.error("[job-orders PATCH /:id/vendor-ack] ", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/job-orders/:id/qc-stage ────────────────────────────────────────
+// request_qc  vendor sends a ready % for inspection. Locked until QC finishes.
+// inspect     QC records how much of that ready qty is ready to dispatch
+//             and how much is rejected. Those two quantities must add up
+//             to the quantity the vendor just marked ready.
+router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
+  try {
+    const action = String(req.body?.action || "");
+    const itemIndex = Number(req.body?.itemIndex);
+    const role = req.user?.role;
+
+    const order = await JobOrder.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: "Job order not found." });
+
+    if (role === "vendor") {
+      const vendorUser = await loadVendorUser(req);
+      if (!vendorOwnsOrder(vendorUser, order))
+        return res.status(404).json({ error: "Job order not found." });
+    }
+
+    if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex >= order.items.length)
+      return res.status(400).json({ error: "Choose a material on this job order." });
+
+    const item = order.items[itemIndex];
+    const who = req.user.name || req.user.username;
+    const now = new Date();
+    let note = "";
+
+    if (action === "request_qc") {
+      if (role !== "vendor" && role !== "admin")
+        return res.status(403).json({ error: "Only the vendor team or an admin can update how much is ready." });
+      if (!order.vendorExpectedDate)
+        return res.status(400).json({
+          error: "Receive this challan first and enter the expected date.",
+        });
+      const orderQty = roundQty(item.qty);
+      const previousQty = submittedReadyQty(item);
+      const remaining = roundQty(orderQty - previousQty);
+      const lotQty = roundQty(req.body?.readyQty);
+      if (remaining <= 0.001)
+        return res.status(400).json({ error: "All of this material is already submitted." });
+      if (!Number.isFinite(lotQty) || lotQty <= 0)
+        return res.status(400).json({ error: "Enter the quantity for this lot." });
+      if (lotQty - orderQty > 0.001 || lotQty - remaining > 0.001)
+        return res.status(400).json({
+          error: `Cannot update more than the quantity (${lotQty - orderQty > 0.001 ? orderQty : remaining}).`,
+        });
+
+      const readyTotal = roundQty(previousQty + lotQty);
+      const readyQty = lotQty;
+      const percent = orderQty ? Math.round((readyTotal / orderQty) * 10000) / 100 : 0;
+
+      item.readyPercent = percent;
+      item.qcRounds.push({
+        readyPercent: percent,
+        readyQty,
+        status: "pending",
+        dispatchQty: 0,
+        rejectedQty: 0,
+        submittedBy: who,
+        submittedAt: now,
+      });
+      note = `${item.description}: lot ${readyQty} sent for QC (${readyTotal} of ${orderQty}, ${percent}%)`;
+    } else if (action === "send_rework") {
+      if (role !== "vendor" && role !== "admin")
+        return res.status(403).json({ error: "Only the vendor team or an admin can send rework." });
+      const open = reworkQty(item);
+      const lotQty = roundQty(req.body?.readyQty);
+      if (open <= 0.001)
+        return res.status(400).json({ error: "No quantity is in rework." });
+      if (!Number.isFinite(lotQty) || lotQty <= 0)
+        return res.status(400).json({ error: "Enter the rework quantity." });
+      if (lotQty - open > 0.001)
+        return res.status(400).json({
+          error: `Cannot update more than the quantity (${open}).`,
+        });
+      item.qcRounds.push({
+        readyPercent: Number(item.readyPercent) || 0,
+        readyQty: lotQty,
+        status: "pending",
+        origin: "rework",
+        dispatchQty: 0,
+        rejectedQty: 0,
+        submittedBy: who,
+        submittedAt: now,
+      });
+      note = `${item.description}: ${lotQty} rework sent for QC`;
+    } else if (action === "inspect") {
+      if (role !== "quality" && role !== "admin")
+        return res.status(403).json({ error: "Only QC or an admin can record ready to dispatch and rejected quantities." });
+
+      const waiting = (item.qcRounds || []).filter((round) => round.status === "pending");
+      const merged = roundQty(waiting.reduce((sum, round) => sum + (Number(round.readyQty) || 0), 0));
+      if (!waiting.length)
+        return res.status(400).json({ error: "Nothing is waiting for QC on this material." });
+
+      const dispatchQty = roundQty(req.body?.dispatchQty);
+      const rejectedQty = roundQty(req.body?.rejectedQty);
+      const reworkRemark = String(req.body?.reworkRemark || "").trim();
+      if (!Number.isFinite(dispatchQty) || dispatchQty < 0 || !Number.isFinite(rejectedQty) || rejectedQty < 0)
+        return res.status(400).json({ error: "Enter ready to dispatch and rejected quantities." });
+      const orderQty = roundQty(item.qty);
+      const inspectedQty = roundQty(dispatchQty + rejectedQty);
+      if (inspectedQty <= 0)
+        return res.status(400).json({ error: "Enter the quantity you inspected." });
+      if (rejectedQty > 0.001 && !reworkRemark)
+        return res.status(400).json({ error: "Enter a remark for the rework quantity." });
+      if (dispatchQty - merged > 0.001 || rejectedQty - merged > 0.001 || inspectedQty - merged > 0.001)
+        return res.status(400).json({
+          error: `Cannot update more than the quantity (${merged}).`,
+        });
+      const alreadyDispatch = readyToDispatchQty(item);
+      const dispatchRoom = roundQty(Math.max(0, orderQty - alreadyDispatch));
+      if (dispatchQty - dispatchRoom > 0.001)
+        return res.status(400).json({
+          error: `Cannot update more than the quantity (${dispatchRoom}). Ready to dispatch is already ${alreadyDispatch}.`,
+        });
+      if (rejectedQty - orderQty > 0.001 || inspectedQty - orderQty > 0.001)
+        return res.status(400).json({
+          error: `Cannot update more than the quantity (${orderQty}).`,
+        });
+
+      let dispatchLeft = dispatchQty;
+      let rejectedLeft = rejectedQty;
+      let remarkLeft = reworkRemark;
+      const nextRounds = [];
+      for (const round of item.qcRounds || []) {
+        const pendingLeft = roundQty(dispatchLeft + rejectedLeft);
+        if (round.status !== "pending" || pendingLeft <= 0.001) {
+          nextRounds.push(round.toObject());
+          continue;
+        }
+        const ready = roundQty(round.readyQty);
+        const take = Math.min(ready, pendingLeft);
+        const takeRejected = Math.min(rejectedLeft, take);
+        const takeDispatch = roundQty(take - takeRejected);
+        rejectedLeft = roundQty(rejectedLeft - takeRejected);
+        dispatchLeft = roundQty(dispatchLeft - takeDispatch);
+        const takeRemark = takeRejected > 0.001 ? remarkLeft : "";
+        if (takeRejected > 0.001) remarkLeft = "";
+        nextRounds.push({
+          readyPercent: round.readyPercent,
+          readyQty: take,
+          status: "inspected",
+          origin: round.origin === "rework" ? "rework" : "order",
+          dispatchQty: takeDispatch,
+          rejectedQty: takeRejected,
+          reworkRemark: takeRemark,
+          submittedBy: round.submittedBy || "",
+          submittedAt: round.submittedAt || null,
+          inspectedBy: who,
+          inspectedAt: now,
+        });
+        const leftOnRound = roundQty(ready - take);
+        if (leftOnRound > 0.001) {
+          nextRounds.push({
+            readyPercent: round.readyPercent,
+            readyQty: leftOnRound,
+            status: "pending",
+            origin: round.origin === "rework" ? "rework" : "order",
+            dispatchQty: 0,
+            rejectedQty: 0,
+            reworkRemark: "",
+            submittedBy: round.submittedBy || "",
+            submittedAt: round.submittedAt || null,
+            inspectedBy: "",
+            inspectedAt: null,
+          });
+        }
+      }
+      item.qcRounds = nextRounds;
+      const stillPending = roundQty(merged - inspectedQty);
+      const dispatchTotal = roundQty(alreadyDispatch + dispatchQty);
+      const reworkNote = rejectedQty > 0.001
+        ? ` ${rejectedQty} sent back to the vendor for rework${reworkRemark ? ` (${reworkRemark})` : ""}.`
+        : "";
+      note = `${item.description}: QC ${dispatchQty} ready to dispatch (total ${dispatchTotal}), ${rejectedQty} rework.${reworkNote}${stillPending > 0.001 ? ` ${stillPending} still pending inspection.` : ""}`;
+    } else {
+      return res.status(400).json({ error: "Unknown stage change." });
+    }
+
+    order.history.push({ action: "qc-stage", by: who, note, at: now });
+    order.markModified("items");
+    await order.save();
+    res.json(await JobOrder.findById(order._id).lean());
+  } catch (err) {
+    console.error("[job-orders PATCH /:id/qc-stage] ", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;

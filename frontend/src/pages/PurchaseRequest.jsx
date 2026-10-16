@@ -781,10 +781,12 @@ export default function PurchaseRequest() {
   async function goToInward(pr) {
     try {
       const pos = await getPurchaseOrdersByPR(pr._id);
-      const poNumbers = [...new Set((pos || []).map((po) => po.poNumber).filter(Boolean))];
+      const list = pos || [];
+      const poNumbers = [...new Set(list.map((po) => po.poNumber).filter(Boolean))];
       navigate("/inward", {
         state: {
-          presetPo: poNumbers.length === 1 ? poNumbers[0] : undefined,
+          presetPoId: list.length === 1 ? list[0]._id : undefined,
+          presetPo: list.length === 1 ? list[0].poNumber : undefined,
           prNumber: pr.prNumber,
           prPoNumbers: poNumbers,
         },

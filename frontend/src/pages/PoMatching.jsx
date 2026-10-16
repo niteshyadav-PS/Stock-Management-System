@@ -38,6 +38,7 @@ export default function PoMatching() {
   function goToInward(po) {
     navigate('/inward', {
       state: {
+        presetPoId: po._id,
         presetPo: po.poNumber,
         prNumber: po.prNumber || undefined,
         prPoNumbers: [po.poNumber],

@@ -141,6 +141,7 @@ export default function PurchaseOrders() {
   const [stockMap, setStockMap] = useState({});
   const [exportLoading, setExportLoading] = useState(false);
   const [poExportLoading, setPoExportLoading] = useState(false);
+  const [poSearch, setPoSearch] = useState("");
 
   // ── PO edit / delete state ───────────────────────────────────────────────
   const [editingPO, setEditingPO] = useState(null);
@@ -217,6 +218,27 @@ export default function PurchaseOrders() {
     setPage: setPrPage,
     setPageSize: setPrPageSize,
   } = useClientPagination(eligiblePRs, 25);
+  const filteredPoList = useMemo(() => {
+    const q = poSearch.trim().toLowerCase();
+    if (!q) return poList;
+    return poList.filter((po) => {
+      const hay = [
+        po.poNumber,
+        po.prNumber,
+        po.vendorName,
+        po.projectName,
+        po.createdByName,
+        po.poDate,
+        po.poExpectedDate,
+        ...(po.items || []).map((it) => it.name),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [poList, poSearch]);
+
   const {
     pageItems: poPageItems,
     page: poPage,
@@ -224,7 +246,7 @@ export default function PurchaseOrders() {
     total: poTotal,
     setPage: setPoPage,
     setPageSize: setPoPageSize,
-  } = useClientPagination(poList, 25);
+  } = useClientPagination(filteredPoList, 25);
 
   // ── Load pending items for a PR in the pending section ───────────────────
   // Only lines with remaining qty > 0 are kept. Fully ordered lines (PR Qty =
@@ -1656,16 +1678,36 @@ export default function PurchaseOrders() {
         >
           <h3 style={{ margin: 0 }}>
             All purchase orders{" "}
-            <span className="pill-count">{poList.length}</span>
+            <span className="pill-count">{filteredPoList.length}</span>
           </h3>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={exportAllPOsToExcel}
-            disabled={poExportLoading || poList.length === 0}
-          >
-            {poExportLoading ? "Exporting…" : "⬇ Export Excel"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              type="search"
+              value={poSearch}
+              onChange={(e) => {
+                setPoSearch(e.target.value);
+                setPoPage(1);
+              }}
+              placeholder="Search PO, PR, vendor, project, item…"
+              style={{
+                minWidth: 220,
+                maxWidth: 360,
+                padding: "7px 12px",
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+                fontFamily: "inherit",
+                fontSize: 13,
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={exportAllPOsToExcel}
+              disabled={poExportLoading || poList.length === 0}
+            >
+              {poExportLoading ? "Exporting…" : "⬇ Export Excel"}
+            </button>
+          </div>
         </div>
         <div className="tablewrap">
           <table>
@@ -2048,6 +2090,9 @@ export default function PurchaseOrders() {
               order.
             </p>
           </div>
+        )}
+        {!!poList.length && !filteredPoList.length && (
+          <div className="empty">No purchase orders match “{poSearch.trim()}”.</div>
         )}
       </div>
 

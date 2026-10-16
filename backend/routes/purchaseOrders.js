@@ -52,16 +52,54 @@ function orderedForPrLine(map, pr, it) {
   return map[key] || 0;
 }
 
-async function inwardedQtyMap(poNumbers) {
-  if (!poNumbers.length) return {};
-  const docs = await Inward.find({ po: { $in: poNumbers } }).lean();
+/**
+ * Received qty keyed by `${poId}||${itemName}`.
+ * Prefer inward.poId; legacy rows (number only) attach to the oldest PO
+ * that shares that poNumber so duplicate numbers don't bleed into newer POs.
+ */
+async function inwardedQtyMapForPos(pos) {
+  const list = Array.isArray(pos) ? pos.filter(Boolean) : [];
+  if (!list.length) return {};
+
+  const ids = list.map((p) => p._id).filter(Boolean);
+  const numbers = [...new Set(list.map((p) => String(p.poNumber || "").trim()).filter(Boolean))];
+
+  const docs = await Inward.find({
+    $or: [
+      ...(ids.length ? [{ poId: { $in: ids } }] : []),
+      ...(numbers.length ? [{ po: { $in: numbers } }] : []),
+    ],
+  }).lean();
+
+  const byNumber = {};
+  for (const po of list) {
+    const n = String(po.poNumber || "").trim();
+    if (!n) continue;
+    if (!byNumber[n]) byNumber[n] = [];
+    byNumber[n].push(po);
+  }
+  for (const n of Object.keys(byNumber)) {
+    byNumber[n].sort(
+      (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0),
+    );
+  }
+
   const map = {};
   for (const doc of docs) {
-    if (!doc.po) continue;
-    const key = `${doc.po}||${doc.name}`;
+    let poId = doc.poId ? String(doc.poId) : "";
+    if (!poId && doc.po) {
+      const group = byNumber[String(doc.po).trim()] || [];
+      if (group.length) poId = String(group[0]._id);
+    }
+    if (!poId || !doc.name) continue;
+    const key = `${poId}||${doc.name}`;
     map[key] = (map[key] || 0) + (doc.qty || 0);
   }
   return map;
+}
+
+function receivedForPoItem(inwarded, po, itemName) {
+  return inwarded[`${String(po._id)}||${itemName}`] || 0;
 }
 
 async function syncPrStatus(prId, { note, byName, byUsername } = {}) {
@@ -262,20 +300,32 @@ router.post('/heal-pending', authMiddleware, requireRole(...ALLOWED_ROLES), asyn
 
 router.get('/by-number/:poNumber', authMiddleware, async (req, res) => {
   try {
-    const po = await PurchaseOrder.findOne({ poNumber: req.params.poNumber }).lean();
-    if (!po) return res.status(404).json({ error: 'PO not found.' });
-    res.json(po);
+    const pos = await PurchaseOrder.find({ poNumber: req.params.poNumber })
+      .sort({ createdAt: 1 })
+      .lean();
+    if (!pos.length) return res.status(404).json({ error: 'PO not found.' });
+    if (pos.length === 1) return res.json(pos[0]);
+
+    // Duplicate numbers: prefer the oldest PO that still has pending qty.
+    const inwarded = await inwardedQtyMapForPos(pos);
+    const pending = pos.filter((po) =>
+      (po.items || []).some((it) => {
+        const received = receivedForPoItem(inwarded, po, it.name);
+        return received < it.orderedQty - 0.00001;
+      }),
+    );
+    res.json(pending[0] || pos[pos.length - 1]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.get('/po-matching', authMiddleware, async (req, res) => {
   try {
     const allPos   = await PurchaseOrder.find().sort({ createdAt: -1 }).lean();
-    const inwarded = await inwardedQtyMap(allPos.map(p => p.poNumber));
+    const inwarded = await inwardedQtyMapForPos(allPos);
 
     const result = allPos.map(po => {
       const items = (po.items || []).map(it => {
-        const receivedQty = inwarded[`${po.poNumber}||${it.name}`] || 0;
+        const receivedQty = receivedForPoItem(inwarded, po, it.name);
         const pendingQty  = Math.max(0, it.orderedQty - receivedQty);
         return { name: it.name, code: it.code || '', uom: it.uom || '',
           orderedQty: it.orderedQty, receivedQty, pendingQty, price: it.price || 0 };
@@ -304,12 +354,12 @@ router.get('/po-matching', authMiddleware, async (req, res) => {
 router.get('/pending-inward', authMiddleware, async (req, res) => {
   try {
     const allPos   = await PurchaseOrder.find().sort({ createdAt: -1 }).lean();
-    const inwarded = await inwardedQtyMap(allPos.map(p => p.poNumber));
+    const inwarded = await inwardedQtyMapForPos(allPos);
 
     const result = allPos
       .map(po => {
         const remainingItems = (po.items || []).filter(it => {
-          const received = inwarded[`${po.poNumber}||${it.name}`] || 0;
+          const received = receivedForPoItem(inwarded, po, it.name);
           return received < it.orderedQty - 0.00001;
         }).length;
         return { ...po, remainingItems };
@@ -329,6 +379,17 @@ router.get('/', authMiddleware, async (req, res) => {
       pagination,
     });
     res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/purchase-orders/:id — full PO by Mongo id (used by Inward dropdown)
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!/^[a-fA-F0-9]{24}$/.test(String(req.params.id || '')))
+      return res.status(400).json({ error: 'Invalid purchase order id.' });
+    const po = await PurchaseOrder.findById(req.params.id).lean();
+    if (!po) return res.status(404).json({ error: 'PO not found.' });
+    res.json(po);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -359,9 +420,11 @@ router.post('/', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, res)
     if (!Array.isArray(items) || !items.length)
       return res.status(400).json({ error: 'At least one item is required.' });
 
-    // const existing = await PurchaseOrder.findOne({ poNumber: cleanPoNumber }).lean();
-    // if (existing)
-    //   return res.status(409).json({ error: `PO number "${cleanPoNumber}" already exists.` });
+    const existing = await PurchaseOrder.findOne({ poNumber: cleanPoNumber }).lean();
+    if (existing)
+      return res.status(409).json({
+        error: `PO number "${cleanPoNumber}" already exists. Use a unique PO number for each purchase order.`,
+      });
 
     const pr = await PurchaseRequest.findById(prId);
     if (!pr) return res.status(404).json({ error: 'Purchase request not found.' });
@@ -462,12 +525,18 @@ router.patch('/:id', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, 
     if (!Array.isArray(items) || !items.length)
       return res.status(400).json({ error: 'At least one item is required.' });
 
-    // if (cleanPoNumber !== po.poNumber) {
-    //   const clash = await PurchaseOrder.findOne({ poNumber: cleanPoNumber, _id: { $ne: po._id } }).lean();
-    //   if (clash) return res.status(409).json({ error: `PO number "${cleanPoNumber}" already exists.` });
-    // }
+    if (cleanPoNumber !== po.poNumber) {
+      const clash = await PurchaseOrder.findOne({
+        poNumber: cleanPoNumber,
+        _id: { $ne: po._id },
+      }).lean();
+      if (clash)
+        return res.status(409).json({
+          error: `PO number "${cleanPoNumber}" already exists. Use a unique PO number.`,
+        });
+    }
 
-    const inwarded = await inwardedQtyMap([po.poNumber]);
+    const inwarded = await inwardedQtyMapForPos([po.toObject ? po.toObject() : po]);
     const cleanItems = [];
     for (const it of items) {
       const name       = String(it.name || '').trim();
@@ -478,7 +547,7 @@ router.patch('/:id', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, 
       if (!orderedQty || orderedQty <= 0) return res.status(400).json({ error: `"${name}": qty must be > 0.` });
       if (!price || price <= 0)           return res.status(400).json({ error: `"${name}": unit price must be > 0.` });
 
-      const received = inwarded[`${po.poNumber}||${name}`] || 0;
+      const received = receivedForPoItem(inwarded, po, name);
       if (orderedQty < received - 0.00001)
         return res.status(400).json({
           error: `"${name}": ordered qty (${orderedQty}) can't be less than already-received qty (${received}).`,
@@ -538,9 +607,9 @@ router.delete('/:id', authMiddleware, requireRole('admin'), async (req, res) => 
     const po = await PurchaseOrder.findById(req.params.id);
     if (!po) return res.status(404).json({ error: 'PO not found.' });
 
-    const inwarded = await inwardedQtyMap([po.poNumber]);
+    const inwarded = await inwardedQtyMapForPos([po.toObject ? po.toObject() : po]);
     const hasReceipts = Object.keys(inwarded).some(
-      k => k.startsWith(`${po.poNumber}||`) && inwarded[k] > 0
+      (k) => k.startsWith(`${String(po._id)}||`) && inwarded[k] > 0,
     );
     if (hasReceipts)
       return res.status(400).json({ error: 'Cannot delete a PO that already has inward receipts against it.' });

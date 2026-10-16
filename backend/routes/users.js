@@ -28,17 +28,44 @@ router.post('/', authMiddleware, requireRole('admin'), async (req, res) => {
     const { name, username, password, role } = req.body;
     if (!name || !username || !password)
       return res.status(400).json({ error: 'name, username and password are required' });
+    if (!ROLES.includes(role))
+      return res.status(400).json({ error: 'Choose a valid role.' });
+    const vendorName = vendorNameFor(role, req.body.vendorName);
+    const vendorJobType = vendorJobTypeFor(role, req.body.vendorJobType);
+    if (role === 'vendor' && !vendorName)
+      return res.status(400).json({ error: 'Choose the vendor company for this login.' });
+    if (role === 'vendor' && !vendorJobType)
+      return res.status(400).json({ error: 'Choose Powder Coating or Fabrication for this vendor login.' });
     const hash = await bcrypt.hash(password, 10);
     const user = await User.findOneAndUpdate(
       { username: username.toLowerCase().trim() },
-      { $set: { name: name.trim(), password: hash, plainPassword: password, role } },
+      { $set: { name: name.trim(), password: hash, plainPassword: password, role, vendorName, vendorJobType } },
       { upsert: true, new: true }
     );
-    res.status(201).json({ name: user.name, username: user.username, role: user.role, plainPassword: user.plainPassword });
+    res.status(201).json({
+      name: user.name,
+      username: user.username,
+      role: user.role,
+      vendorName: user.vendorName || '',
+      vendorJobType: user.vendorJobType || '',
+      plainPassword: user.plainPassword,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-const ROLES = ['admin', 'store', 'store_manager', 'purchase', 'accounts', 'viewer'];
+const ROLES = ['admin', 'store', 'store_manager', 'purchase', 'accounts', 'viewer', 'vendor', 'quality'];
+const VENDOR_JOB_TYPES = ['powder_coating', 'fabrication'];
+
+function vendorNameFor(role, vendorName) {
+  if (role !== 'vendor') return '';
+  return String(vendorName || '').trim();
+}
+
+function vendorJobTypeFor(role, vendorJobType) {
+  if (role !== 'vendor') return '';
+  const t = String(vendorJobType || '').trim();
+  return VENDOR_JOB_TYPES.includes(t) ? t : '';
+}
 
 // PATCH /api/users/:username — admin edits name, role, username, and password
 router.patch('/:username', authMiddleware, requireRole('admin'), async (req, res) => {
@@ -55,13 +82,19 @@ router.patch('/:username', authMiddleware, requireRole('admin'), async (req, res
     if (!name) return res.status(400).json({ error: 'Name is required.' });
     if (!nextUsername) return res.status(400).json({ error: 'Username is required.' });
     if (!ROLES.includes(role)) return res.status(400).json({ error: 'Choose a valid role.' });
+    const vendorName = vendorNameFor(role, req.body.vendorName);
+    const vendorJobType = vendorJobTypeFor(role, req.body.vendorJobType);
+    if (role === 'vendor' && !vendorName)
+      return res.status(400).json({ error: 'Choose the vendor company for this login.' });
+    if (role === 'vendor' && !vendorJobType)
+      return res.status(400).json({ error: 'Choose Powder Coating or Fabrication for this vendor login.' });
 
     if (nextUsername !== current.username) {
       const taken = await User.findOne({ username: nextUsername });
       if (taken) return res.status(400).json({ error: 'That username is already in use.' });
     }
 
-    const update = { name, username: nextUsername, role };
+    const update = { name, username: nextUsername, role, vendorName, vendorJobType };
     if (password.trim()) {
       update.password = await bcrypt.hash(password, 10);
       update.plainPassword = password;
@@ -76,6 +109,8 @@ router.patch('/:username', authMiddleware, requireRole('admin'), async (req, res
       name: user.name,
       username: user.username,
       role: user.role,
+      vendorName: user.vendorName || '',
+      vendorJobType: user.vendorJobType || '',
       plainPassword: user.plainPassword,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }

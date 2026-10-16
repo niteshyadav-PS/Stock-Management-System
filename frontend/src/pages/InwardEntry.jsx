@@ -9,6 +9,7 @@ import {
   deleteInward,
   getPendingInwardPOs,
   getPurchaseOrderByNumber,
+  getPurchaseOrderById,
   unwrapList,
 } from "../api/api";
 import { loadInPages } from "../api/paged";
@@ -53,6 +54,7 @@ const EMPTY = {
   invdate: "",
   challan: "",
   po: "",
+  poId: "",
   vendor: "",
   name: "",
   type: "",
@@ -841,11 +843,7 @@ export default function InwardEntry() {
   const [poLoading, setPoLoading] = useState(false);
   const [manualRows, setManualRows] = useState([emptyManualRow()]);
 
-  // ── PR → Inward hand-off ───────────────────────────────────────────────
-  // The Purchase Request page's "Pending Inward Entry" button navigates here with
-  // `state: { presetPo, prNumber, prPoNumbers }`. We wait until poList has
-  // loaded (so the preset PO actually exists as a searchable option), apply
-  // it once, show a small banner, then clear the navigation state.
+
   const prefillAppliedRef = useRef(false);
   const [prBanner, setPrBanner] = useState(null); // { prNumber, poNumbers }
 
@@ -928,13 +926,17 @@ export default function InwardEntry() {
   // Consume the PR hand-off once the PO dropdown data is available.
   useEffect(() => {
     const st = location.state;
-    if (!st || (!st.presetPo && !st.prNumber) || prefillAppliedRef.current) return;
-    if (st.presetPo && !poList.length) return; // wait for PO dropdown data to load
+    if (!st || (!st.presetPoId && !st.presetPo && !st.prNumber) || prefillAppliedRef.current) return;
+    if ((st.presetPoId || st.presetPo) && !poList.length) return; // wait for PO dropdown data
 
     prefillAppliedRef.current = true;
 
-    if (st.presetPo) {
-      handlePoSelect(st.presetPo);
+    if (st.presetPoId) {
+      const match = poList.find((p) => String(p._id) === String(st.presetPoId));
+      handlePoSelect(match || { _id: st.presetPoId, poNumber: st.presetPo || "" });
+    } else if (st.presetPo) {
+      const match = poList.find((p) => p.poNumber === st.presetPo);
+      handlePoSelect(match || st.presetPo);
     }
     if (st.prNumber) {
       setPrBanner({ prNumber: st.prNumber, poNumbers: st.prPoNumbers || [] });
@@ -1164,17 +1166,49 @@ export default function InwardEntry() {
   }
   ──────────────────────────────────────────────────────────────────────── */
 
-  // ── PO logic ──────────────────────────────────────────────────────────
-  async function handlePoSelect(poNumber) {
-    setForm((f) => ({ ...f, po: poNumber, vendor: "" }));
-    setPoSearch(poNumber);
+  // ── PO logic (prefer Mongo _id so duplicate PO numbers don't collide) ──
+  async function handlePoSelect(poOrNumber) {
+    if (!poOrNumber) {
+      setForm((f) => ({ ...f, po: "", poId: "", vendor: "" }));
+      setPoSearch("");
+      setPoRows([]);
+      setPoManual(false);
+      return;
+    }
+
+    const poId =
+      typeof poOrNumber === "object" && poOrNumber._id
+        ? String(poOrNumber._id)
+        : "";
+    const poNumber =
+      typeof poOrNumber === "object"
+        ? String(poOrNumber.poNumber || "")
+        : String(poOrNumber);
+
+    setForm((f) => ({ ...f, po: poNumber, poId, vendor: "" }));
+    setPoSearch(
+      typeof poOrNumber === "object" && poOrNumber.vendorName
+        ? `${poNumber} — ${poOrNumber.vendorName}`
+        : poNumber,
+    );
     setPoRows([]);
     setPoManual(false);
-    if (!poNumber) return;
     setPoLoading(true);
     try {
-      const po = await getPurchaseOrderByNumber(poNumber);
-      setForm((f) => ({ ...f, vendor: po.vendorName || "" }));
+      const po = poId
+        ? await getPurchaseOrderById(poId)
+        : await getPurchaseOrderByNumber(poNumber);
+      setForm((f) => ({
+        ...f,
+        po: po.poNumber || poNumber,
+        poId: String(po._id || poId || ""),
+        vendor: po.vendorName || "",
+      }));
+      setPoSearch(
+        po.vendorName
+          ? `${po.poNumber} — ${po.vendorName}`
+          : po.poNumber || poNumber,
+      );
       const rows = (po.items || []).map((it) => {
         const mat = master.find((m) => m.name === it.name || m.code === it.code);
         return {
@@ -1310,6 +1344,7 @@ export default function InwardEntry() {
           invdate: form.invdate,
           challan: form.challan,
           po: form.po,
+          poId: form.poId || null,
           vendor: form.vendor,
           name: r.name,
           type: r.type,
@@ -1371,6 +1406,7 @@ export default function InwardEntry() {
           invdate: form.invdate,
           challan: form.challan,
           po: form.po,
+          poId: form.poId || null,
           vendor: form.vendor,
           by: receivedBy,
           name: r.name,
@@ -2221,7 +2257,7 @@ export default function InwardEntry() {
                     required
                     value={form.po}
                     onChange={(e) =>
-                      setForm((f) => ({ ...f, po: e.target.value }))
+                      setForm((f) => ({ ...f, po: e.target.value, poId: "" }))
                     }
                     placeholder="Enter PO number manually"
                     autoFocus
@@ -2234,7 +2270,7 @@ export default function InwardEntry() {
                     onClick={() => {
                       setPoManual(false);
                       setPoSearch("");
-                      setForm((f) => ({ ...f, po: "" }));
+                      setForm((f) => ({ ...f, po: "", poId: "" }));
                       setPoRows([]);
                     }}
                   >
@@ -2249,8 +2285,8 @@ export default function InwardEntry() {
                     onChange={(e) => {
                       setPoSearch(e.target.value);
                       setPoDropdownOpen(true);
-                      if (form.po) {
-                        setForm((f) => ({ ...f, po: "" }));
+                      if (form.po || form.poId) {
+                        setForm((f) => ({ ...f, po: "", poId: "" }));
                         setPoRows([]);
                       }
                     }}
@@ -2285,7 +2321,7 @@ export default function InwardEntry() {
                           className="po-dropdown-item"
                           onMouseDown={() => {
                             setPoDropdownOpen(false);
-                            handlePoSelect(po.poNumber);
+                            handlePoSelect(po);
                           }}
                         >
                           {po.poNumber} — {po.vendorName} (
@@ -2298,7 +2334,7 @@ export default function InwardEntry() {
                         onMouseDown={() => {
                           setPoManual(true);
                           setPoSearch("");
-                          setForm((f) => ({ ...f, po: "" }));
+                          setForm((f) => ({ ...f, po: "", poId: "" }));
                           setPoRows([]);
                           setPoDropdownOpen(false);
                         }}

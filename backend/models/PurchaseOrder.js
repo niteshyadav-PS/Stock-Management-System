@@ -44,5 +44,6 @@ const purchaseOrderSchema = new mongoose.Schema({
 
 purchaseOrderSchema.index({ prId: 1 });
 purchaseOrderSchema.index({ createdAt: -1 });
+purchaseOrderSchema.index({ poNumber: 1 });
 
 module.exports = mongoose.model('PurchaseOrder', purchaseOrderSchema);

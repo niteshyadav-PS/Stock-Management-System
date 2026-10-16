@@ -8,7 +8,7 @@ const { parsePagination, paginateQuery } = require('../utils/paginate');
 
 // Allowed fields for create / full edit
 const INWARD_FIELDS = [
-  'date','invdate','challan','po','vendor',
+  'date','invdate','challan','po','poId','vendor',
   'name','type','code','category','uom',
   'qty','gin','by','location','remarks','price',
 ];
@@ -191,6 +191,7 @@ router.post('/', authMiddleware, requireRole('admin','store','store_manager','pu
     data.qty   = parseFloat(data.qty);
     data.gin   = String(data.gin).trim();
     data.price = parseFloat(data.price) || 0;
+    if (!data.poId) data.poId = null;
 
     const entry = await Inward.create(data);
 
@@ -215,6 +216,7 @@ router.post('/bulk', authMiddleware, requireRole('admin','store','store_manager'
       d.qty   = parseFloat(d.qty)   || 0;
       d.gin   = d.gin != null ? String(d.gin).trim() : '';
       d.price = parseFloat(d.price) || 0;
+      if (!d.poId) d.poId = null;
       return d;
     }).filter(d => d.name && d.qty > 0 && d.gin);
 

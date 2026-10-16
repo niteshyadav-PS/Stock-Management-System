@@ -149,4 +149,6 @@ export const ROLE_LABELS = {
   purchase:      'Purchase Team',
   accounts:      'Accounts',
   viewer:        'Viewer',
+  vendor:        'Vendor',
+  quality:       'QC Team',
 };

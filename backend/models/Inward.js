@@ -4,7 +4,9 @@ const inwardSchema = new mongoose.Schema({
   date:     { type: String, default: '' },
   invdate:  { type: String, default: '' },
   challan:  { type: String, default: '' },
-  po:       { type: String, default: '' },
+  po:       { type: String, default: '' }, // display PO number
+  // Exact PurchaseOrder link — required when several POs share one po number.
+  poId:     { type: mongoose.Schema.Types.ObjectId, ref: 'PurchaseOrder', default: null, index: true },
   vendor:   { type: String, default: '' },
   name:     { type: String, required: true },
   type:     { type: String, default: '' },
