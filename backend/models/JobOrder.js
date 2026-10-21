@@ -25,6 +25,10 @@ const qcRoundSchema = new mongoose.Schema({
   rejectedQty:  { type: Number, default: 0, min: 0 },
   // Why QC sent this quantity to rework.
   reworkRemark: { type: String, default: '' },
+  // True when QC skipped inspection and accepted as ready to dispatch.
+  skipped:      { type: Boolean, default: false },
+  // Why QC skipped quality checking (required when skipped).
+  skipRemark:   { type: String, default: '' },
   submittedBy:  { type: String, default: '' },
   submittedAt:  { type: Date, default: null },
   inspectedBy:  { type: String, default: '' },

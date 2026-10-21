@@ -16,9 +16,10 @@ import PoMatching from "./pages/PoMatching";
 import PurchaseOrders from "./pages/PurchaseOrders";
 import JobOrder from './pages/JobOrder';
 import VendorQc from './pages/VendorQc';
+import VendorDashboard from './pages/VendorDashboard';
 
 const ROLE_ACCESS = {
-  dashboard: ["admin", "store", "store_manager", "purchase"],
+  dashboard: ["admin", "store", "store_manager", "purchase", "vendor"],
   master: ["admin", "purchase", "viewer"],
   inward: ["admin", "store", "store_manager"],
   outward: ["admin", "store", "store_manager"],
@@ -49,6 +50,8 @@ function getDefaultPath(role) {
       return "/stock";
 
     case "vendor":
+      return "/dashboard/vendor";
+
     case "quality":
       return "/job-orders";
 
@@ -111,6 +114,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute page="dashboard">
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/vendor"
+          element={
+            <ProtectedRoute page="dashboard">
+              <VendorDashboard />
             </ProtectedRoute>
           }
         />

@@ -28,7 +28,9 @@ export default function Login() {
 
       const role = data.user.role;
       const path =
-        role === "vendor" || role === "quality"
+        role === "vendor"
+          ? "/dashboard/vendor"
+          : role === "quality"
           ? "/job-orders"
           : role === "viewer"
           ? "/stock"

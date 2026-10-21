@@ -25,6 +25,11 @@ const NAV_SECTIONS = [
     ),
     items: [
       {
+        label: "Vendor Dashboard",
+        path: "/dashboard/vendor",
+        roles: ["vendor"],
+      },
+      {
         label: "Powder Coating",
         path: "/job-orders",
         roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
@@ -270,6 +275,9 @@ export default function Layout() {
         break;
 
       case "vendor":
+        navigate("/dashboard/vendor");
+        break;
+
       case "quality":
         navigate("/job-orders");
         break;

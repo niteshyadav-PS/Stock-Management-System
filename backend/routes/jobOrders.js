@@ -740,6 +740,8 @@ router.patch("/:id/vendor-ack", authMiddleware, async (req, res) => {
 // inspect     QC records how much of that ready qty is ready to dispatch
 //             and how much is rejected. Those two quantities must add up
 //             to the quantity the vendor just marked ready.
+// skip_qc     QC/admin skips quality check; qty goes to ready-to-dispatch.
+//             Requires skipRemark. Works on pending lots, or remaining unsent qty.
 router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
   try {
     const action = String(req.body?.action || "");
@@ -912,6 +914,76 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
         ? ` ${rejectedQty} sent back to the vendor for rework${reworkRemark ? ` (${reworkRemark})` : ""}.`
         : "";
       note = `${item.description}: QC ${dispatchQty} ready to dispatch (total ${dispatchTotal}), ${rejectedQty} rework.${reworkNote}${stillPending > 0.001 ? ` ${stillPending} still pending inspection.` : ""}`;
+    } else if (action === "skip_qc") {
+      if (role !== "quality" && role !== "admin")
+        return res.status(403).json({ error: "Only QC or an admin can skip quality checking." });
+
+      const skipRemark = String(req.body?.skipRemark || "").trim();
+      if (!skipRemark)
+        return res.status(400).json({ error: "Enter a remark explaining why QC is skipped." });
+
+      const orderQty = roundQty(item.qty);
+      const waiting = (item.qcRounds || []).filter((round) => round.status === "pending");
+      const pendingQty = roundQty(
+        waiting.reduce((sum, round) => sum + (Number(round.readyQty) || 0), 0),
+      );
+      const remaining = roundQty(orderQty - submittedReadyQty(item));
+      const alreadyDispatch = readyToDispatchQty(item);
+      const dispatchRoom = roundQty(Math.max(0, orderQty - alreadyDispatch));
+
+      if (waiting.length) {
+        if (pendingQty - dispatchRoom > 0.001)
+          return res.status(400).json({
+            error: `Cannot skip more than the quantity still open for dispatch (${dispatchRoom}).`,
+          });
+        item.qcRounds = (item.qcRounds || []).map((round) => {
+          if (round.status !== "pending") return round.toObject?.() || round;
+          const ready = roundQty(round.readyQty);
+          return {
+            readyPercent: round.readyPercent,
+            readyQty: ready,
+            status: "inspected",
+            origin: round.origin === "rework" ? "rework" : "order",
+            dispatchQty: ready,
+            rejectedQty: 0,
+            reworkRemark: "",
+            skipped: true,
+            skipRemark,
+            submittedBy: round.submittedBy || "",
+            submittedAt: round.submittedAt || null,
+            inspectedBy: who,
+            inspectedAt: now,
+          };
+        });
+        note = `${item.description}: QC skipped for ${pendingQty}. Reason: ${skipRemark}`;
+      } else if (remaining > 0.001) {
+        const take = Math.min(remaining, dispatchRoom);
+        if (take <= 0.001)
+          return res.status(400).json({ error: "Nothing left to mark ready to dispatch." });
+        const readyTotal = roundQty(submittedReadyQty(item) + take);
+        const percent = orderQty ? Math.round((readyTotal / orderQty) * 10000) / 100 : 0;
+        item.readyPercent = percent;
+        item.qcRounds.push({
+          readyPercent: percent,
+          readyQty: take,
+          status: "inspected",
+          origin: "order",
+          dispatchQty: take,
+          rejectedQty: 0,
+          reworkRemark: "",
+          skipped: true,
+          skipRemark,
+          submittedBy: who,
+          submittedAt: now,
+          inspectedBy: who,
+          inspectedAt: now,
+        });
+        note = `${item.description}: QC skipped for ${take} (not sent for inspection). Reason: ${skipRemark}`;
+      } else {
+        return res.status(400).json({
+          error: "Nothing to skip. No pending QC lots and no remaining quantity.",
+        });
+      }
     } else {
       return res.status(400).json({ error: "Unknown stage change." });
     }
