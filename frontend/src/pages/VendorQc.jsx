@@ -964,7 +964,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         }
         .vq-table {
           width: 100%;
-          min-width: 980px;
+          min-width: 1180px;
           border-collapse: collapse;
           table-layout: fixed;
         }
@@ -986,23 +986,41 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           line-height: 1.25;
         }
         .vq-table td { font-size: 12.5px; }
-        .vq-table td.num, .vq-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .vq-table td.num {
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap;
+        }
+        .vq-table th.num {
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+          white-space: normal;
+        }
+        .vq-table th.vq-th-dispatch {
+          white-space: normal;
+          line-height: 1.2;
+          hyphens: auto;
+        }
+        .vq-table th.vq-th-act {
+          white-space: nowrap;
+          text-align: center;
+        }
         .vq-table td.vq-desc { white-space: normal; font-weight: 500; }
         .vq-table td.vq-act {
           white-space: nowrap;
           vertical-align: middle;
-          width: 1%;
+          text-align: center;
         }
-        .vq-table col.vq-col-sr { width: 36px; }
-        .vq-table col.vq-col-desc { width: 14%; }
+        .vq-table col.vq-col-sr { width: 40px; }
+        .vq-table col.vq-col-desc { width: 16%; }
         .vq-table col.vq-col-qty { width: 56px; }
-        .vq-table col.vq-col-uom { width: 48px; }
-        .vq-table col.vq-col-process { width: 14%; }
-        .vq-table col.vq-col-project { width: 10%; }
-        .vq-table col.vq-col-remark { width: 9%; }
-        .vq-table col.vq-col-ready { width: 12%; }
-        .vq-table col.vq-col-dispatch { width: 8%; }
-        .vq-table col.vq-col-act { width: auto; }
+        .vq-table col.vq-col-uom { width: 52px; }
+        .vq-table col.vq-col-process { width: 13%; }
+        .vq-table col.vq-col-project { width: 11%; }
+        .vq-table col.vq-col-remark { width: 10%; }
+        .vq-table col.vq-col-ready { width: 140px; }
+        .vq-table col.vq-col-dispatch { width: 92px; }
+        .vq-table col.vq-col-act { width: 110px; }
         .vq-flat { width: 100%; min-width: 760px; border-collapse: collapse; }
         .vq-flat th, .vq-flat td {
           vertical-align: middle;
@@ -1746,8 +1764,8 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                         <th>Project</th>
                         <th>Remark</th>
                         <th>Ready qty</th>
-                        <th className="num">Ready to dispatch</th>
-                        <th>Update</th>
+                        <th className="num vq-th-dispatch">Ready to dispatch</th>
+                        <th className="vq-th-act">Update</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2380,7 +2398,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
               </div>
               <div className="field" style={{ marginBottom: 12 }}>
                 <label>
-                  Expected date <span style={{ color: "var(--red)" }}>*</span>
+                  Expected Dispatch Date <span style={{ color: "var(--red)" }}>*</span>
                 </label>
                 <input
                   type="date"
