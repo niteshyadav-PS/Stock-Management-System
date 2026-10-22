@@ -1,5 +1,6 @@
 import React, { Fragment, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { todayStr } from "../utils/helpers";
 import { unwrapList } from "../api/api";
@@ -742,7 +743,7 @@ function statusLabel(order) {
 
 function qcSummary(order) {
   if (!String(order?.vendorExpectedDate || "").trim()) {
-    return "Waiting for vendor receive";
+    return "Awaiting vendor";
   }
   let pending = 0;
   let dispatch = 0;
@@ -753,11 +754,11 @@ function qcSummary(order) {
     }
   }
   const parts = [];
-  if (pending) parts.push(`${pending} with QC`);
-  if (dispatch) parts.push(`${Math.round(dispatch * 1000) / 1000} ready to dispatch`);
+  if (pending) parts.push(`${pending} QC`);
+  if (dispatch) parts.push(`${Math.round(dispatch * 1000) / 1000} dispatch`);
   const rework = (order?.items || []).reduce((sum, it) => sum + reworkQty(it), 0);
   if (rework > 0.001) parts.push(`${Math.round(rework * 1000) / 1000} rework`);
-  return parts.length ? parts.join(" · ") : "Waiting for vendor qty";
+  return parts.length ? parts.join(" · ") : "Awaiting qty";
 }
 
 function qcPercent(qty, orderQty) {
@@ -1057,7 +1058,6 @@ function PrintChallan({ order }) {
                     fontSize: 13,
                     marginBottom: 4,
                     lineHeight: 1.35,
-                     fontSize: 12,
                   }}
                 >
                   {order.vendorName || "—"}
@@ -2601,7 +2601,7 @@ function ViewModal({ order, onClose, onEdit }) {
   return (
     <div className="jo-modal-overlay" onClick={onClose}>
       <div
-        className="jo-modal-panel jo-modal-panel--lg"
+        className="jo-modal-panel jo-modal-panel--lg jo-modal-panel--view"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal header */}
@@ -2734,7 +2734,7 @@ function ViewModal({ order, onClose, onEdit }) {
           >
             <PrintItemsTable order={detail} />
           </div>
-          <div className="tablewrap" style={{ marginBottom: 20 }}>
+          <div className="tablewrap jo-view-items-wrap" style={{ marginBottom: 20 }}>
             <table>
               <thead>
                 <tr>
@@ -2844,15 +2844,12 @@ function ViewModal({ order, onClose, onEdit }) {
               textTransform: "uppercase",
               letterSpacing: "1px",
               color: "#8a8270",
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
             Vendor readiness and QC
           </h3>
-          <p className="no-print" style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 0, marginBottom: 10 }}>
-            Ready quantity, dispatch, and rework.
-          </p>
-          <div className="tablewrap no-print" style={{ marginBottom: 20 }}>
+          <div className="tablewrap jo-view-qc-wrap no-print" style={{ marginBottom: 20 }}>
             <table>
               <thead>
                 <tr>
@@ -2873,13 +2870,13 @@ function ViewModal({ order, onClose, onEdit }) {
                     <tr key={`qc-${i}`}>
                       <td style={{ fontWeight: 500 }}>{it.description}</td>
                       <td className="num">{it.qty} {it.unit || "NOS"}</td>
-                      <td className="num">{qcQtyLabel(line.readyQty, line.orderQty)}</td>
-                      <td className="num">{qcQtyLabel(line.pendingQty, line.orderQty)}</td>
-                      <td className="num">{qcQtyLabel(line.dispatch, line.orderQty)}</td>
-                      <td className="num">{qcQtyLabel(line.rework, line.orderQty)}</td>
+                      <td className="num">{line.readyQty ? Math.round(line.readyQty * 1000) / 1000 : "—"}</td>
+                      <td className="num">{line.pendingQty ? Math.round(line.pendingQty * 1000) / 1000 : "—"}</td>
+                      <td className="num">{line.dispatch ? Math.round(line.dispatch * 1000) / 1000 : "—"}</td>
+                      <td className="num">{line.rework ? Math.round(line.rework * 1000) / 1000 : "—"}</td>
                       <td style={{ fontSize: 12, whiteSpace: "normal", maxWidth: 220 }}>
                         {line.reworkNotes.length
-                          ? line.reworkNotes.map((note) => `${note.qty}: ${note.remark}`).join(" · ")
+                          ? line.reworkNotes.map((note) => note.remark).join(" · ")
                           : "—"}
                       </td>
                       <td style={{ fontSize: 12 }}>{line.status}</td>
@@ -2994,16 +2991,14 @@ function OrderMaterials({ order }) {
           <div className="jo-materials-text">{order.deliveryAddress || "—"}</div>
         </div>
       </div>
-      <div className="tablewrap jo-materials-scroll jo-materials-desktop">
+      <div className="jo-materials-scroll jo-materials-desktop">
         <table className="jo-materials-table">
           <colgroup>
             <col className="jo-m-sr" />
             <col className="jo-m-desc" />
             <col className="jo-m-qty" />
-            <col className="jo-m-uom" />
             <col className="jo-m-process" />
             <col className="jo-m-project" />
-            <col className="jo-m-remark" />
             <col className="jo-m-num" />
             <col className="jo-m-num" />
             <col className="jo-m-num" />
@@ -3014,10 +3009,8 @@ function OrderMaterials({ order }) {
               <th>Sr</th>
               <th>Item</th>
               <th className="num">Qty</th>
-              <th>UOM</th>
               <th>Process / RAL</th>
               <th>Project</th>
-              <th>Remark</th>
               <th className="num">Ready</th>
               <th className="num">Rework</th>
               <th className="num">Recv</th>
@@ -3031,15 +3024,13 @@ function OrderMaterials({ order }) {
                 <tr key={i}>
                   <td>{i + 1}</td>
                   <td className="jo-materials-desc">{it.description}</td>
-                  <td className="num">{it.qty}</td>
-                  <td>{it.unit || "NOS"}</td>
+                  <td className="num">{it.qty} {it.unit || "NOS"}</td>
                   <td>{it.process || "—"}</td>
                   <td>{it.projectName || "—"}</td>
-                  <td>{it.remark || "—"}</td>
-                  <td className="num">{qcQtyLabel(line.dispatch, line.orderQty)}</td>
-                  <td className="num">{qcQtyLabel(line.rework, line.orderQty)}</td>
-                  <td className="num">{num(it.receivedQty)}</td>
-                  <td className="num">{receivableNow(it)}</td>
+                  <td className="num">{line.dispatch ? Math.round(line.dispatch * 1000) / 1000 : "—"}</td>
+                  <td className="num">{line.rework ? Math.round(line.rework * 1000) / 1000 : "—"}</td>
+                  <td className="num">{num(it.receivedQty) || "—"}</td>
+                  <td className="num">{receivableNow(it) || "—"}</td>
                 </tr>
               );
             })}
@@ -3906,6 +3897,9 @@ const JOB_TYPE_META = {
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function JobOrder({ jobType = "powder_coating" }) {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const focusHandledRef = useRef("");
   const meta = JOB_TYPE_META[jobType] || JOB_TYPE_META.powder_coating;
   const resolvedJobType = meta.key;
   const vendors = vendorsForJobType(resolvedJobType);
@@ -3916,6 +3910,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
   const [showForm, setShowForm] = useState(false);
   const [viewOrder, setViewOrder] = useState(null);
   const [openOrderId, setOpenOrderId] = useState(null);
+  const [actionsMenuId, setActionsMenuId] = useState(null);
   const [receiveOrder, setReceiveOrder] = useState(null);
   const [editOrder, setEditOrder] = useState(null);
   const [printOrder, setPrintOrder] = useState(null);
@@ -3973,12 +3968,42 @@ export default function JobOrder({ jobType = "powder_coating" }) {
     resetForm();
     setViewOrder(null);
     setOpenOrderId(null);
+    setActionsMenuId(null);
     setReceiveOrder(null);
     setEditOrder(null);
     setColFilters(EMPTY_COL_FILTERS);
     setMsg({ text: "", ok: true });
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!actionsMenuId) return undefined;
+    const onDoc = (e) => {
+      if (!e.target.closest?.(".jo-more-wrap")) setActionsMenuId(null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setActionsMenuId(null);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [actionsMenuId]);
+
+  // Open challan when arriving from Job Order Dashboard.
+  useEffect(() => {
+    const focusChallan = location.state?.focusChallan;
+    if (!focusChallan || loading) return;
+    if (focusHandledRef.current === String(focusChallan)) return;
+    const match = orders.find((o) => String(o.srNo) === String(focusChallan));
+    if (!match) return;
+    focusHandledRef.current = String(focusChallan);
+    setViewOrder(match);
+    setOpenOrderId(match._id);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [loading, location.pathname, location.state, navigate, orders]);
 
   // Sends the currently-selected order's challan to the browser's print dialog
   // (from which the user can choose "Save as PDF") whenever printOrder is set.
@@ -4289,62 +4314,87 @@ export default function JobOrder({ jobType = "powder_coating" }) {
   }
 
   function OrderActionButtons({ order, hasPending }) {
+    const open = actionsMenuId === order._id;
+    const menuItems = [];
+    if (canCreate) {
+      menuItems.push({
+        key: "edit",
+        label: "Edit",
+        onClick: () => setEditOrder(order),
+      });
+    }
+    if (hasPending && canCreate) {
+      menuItems.push({
+        key: "receive",
+        label: order.status === "partial" ? "Receive" : "Received",
+        primary: true,
+        onClick: () => setReceiveOrder(order),
+      });
+    }
+    menuItems.push({
+      key: "pdf",
+      label: "PDF",
+      onClick: () => handlePrintPdf(order),
+    });
+    if (isAdmin) {
+      menuItems.push({
+        key: "delete",
+        label: "Delete",
+        danger: true,
+        onClick: () => handleDelete(order),
+      });
+    }
+
     return (
       <div className="jo-order-actions">
         <button
           type="button"
           className="btn btn-ghost btn-sm"
           onClick={() => setViewOrder(order)}
-          title="View"
+          title="View details"
         >
           View
         </button>
-        {canCreate && (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => setEditOrder(order)}
-            title="Edit"
-          >
-            Edit
-          </button>
+        {menuItems.length > 0 && (
+          <div className="jo-more-wrap">
+            <button
+              type="button"
+              className={`btn btn-ghost btn-sm jo-more-btn${open ? " is-open" : ""}`}
+              title="More actions"
+              aria-label="More actions"
+              aria-expanded={open}
+              onClick={() =>
+                setActionsMenuId((id) => (id === order._id ? null : order._id))
+              }
+            >
+              ⋮
+            </button>
+            {open && (
+              <div className="jo-more-menu" role="menu">
+                {menuItems.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="menuitem"
+                    className={`jo-more-item${item.primary ? " is-primary" : ""}${item.danger ? " is-danger" : ""}`}
+                    onClick={() => {
+                      setActionsMenuId(null);
+                      item.onClick();
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
-        {isAdmin && (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm btn-icon"
-            style={{ color: "var(--red)" }}
-            onClick={() => handleDelete(order)}
-            title="Delete job order"
-            aria-label="Delete"
-          >
-            🗑
-          </button>
-        )}
-        {hasPending && canCreate && (
-          <button
-            type="button"
-            className="btn btn-sm btn-in"
-            onClick={() => setReceiveOrder(order)}
-            title={order.status === "partial" ? "Continue receiving" : "Mark received"}
-          >
-            {order.status === "partial" ? "Receive" : "Received"}
-          </button>
-        )}
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => handlePrintPdf(order)}
-          title="Download PDF"
-        >
-          PDF
-        </button>
       </div>
     );
   }
 
   return (
-    <>
+    <div className="jo-page">
       <style>{`
        @media print {
   .no-print { display: none !important; }
@@ -4607,12 +4657,12 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         .jo-receive-site { grid-column: 1 / -1; }
         .jo-mobile-only-label { display: none; font-size: 11px; font-weight: 600; color: var(--text-3); margin-bottom: 3px; }
 
-        .jo-materials { padding: 0 2px 8px; }
+        .jo-materials { padding: 0; width: 100%; box-sizing: border-box; }
         .jo-materials-parties {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 10px 16px;
-          margin: 4px 0 8px;
+          margin: 0 0 10px;
         }
         .jo-materials-kicker {
           font-size: 10px;
@@ -4635,10 +4685,11 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           overflow: hidden;
         }
         .jo-materials-scroll {
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
+          width: 100%;
+          overflow: visible;
           border: 1px solid var(--line);
-          border-radius: 6px;
+          border-radius: 8px;
+          background: #fff;
         }
         .jo-materials-table {
           width: 100%;
@@ -4649,12 +4700,12 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         .jo-materials-table td {
           vertical-align: middle;
           text-align: left;
-          padding: 5px 6px;
+          padding: 8px 8px;
           border-bottom: 1px solid var(--line);
           font-size: 12px;
           line-height: 1.3;
-          white-space: normal;
-          word-break: break-word;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .jo-materials-table th {
           font-size: 9.5px;
@@ -4662,24 +4713,30 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           text-transform: uppercase;
           letter-spacing: 0.03em;
           color: #8a8270;
-          background: var(--paper-dim);
-          white-space: normal;
+          background: #fff;
           line-height: 1.2;
+          white-space: nowrap;
         }
         .jo-materials-table td.num,
         .jo-materials-table th.num {
           text-align: right;
           font-variant-numeric: tabular-nums;
           white-space: nowrap;
+          overflow: visible;
+          text-overflow: clip;
         }
-        .jo-materials-table col.jo-m-sr { width: 32px; }
-        .jo-materials-table col.jo-m-desc { width: 16%; }
-        .jo-materials-table col.jo-m-qty { width: 52px; }
-        .jo-materials-table col.jo-m-uom { width: 44px; }
-        .jo-materials-table col.jo-m-process { width: 14%; }
-        .jo-materials-table col.jo-m-project { width: 10%; }
-        .jo-materials-table col.jo-m-remark { width: 9%; }
-        .jo-materials-table col.jo-m-num { width: 72px; }
+        .jo-materials-table col.jo-m-sr { width: 40px; }
+        .jo-materials-table col.jo-m-desc { width: 18%; }
+        .jo-materials-table col.jo-m-qty { width: 88px; }
+        .jo-materials-table col.jo-m-process { width: 18%; }
+        .jo-materials-table col.jo-m-project { width: 14%; }
+        .jo-materials-table col.jo-m-num { width: 64px; }
+        .jo-materials-table .jo-materials-desc,
+        .jo-materials-table td:nth-child(4),
+        .jo-materials-table td:nth-child(5) {
+          white-space: normal;
+          word-break: break-word;
+        }
         .jo-materials-desc { font-weight: 500; }
         .jo-materials-mobile { display: none; flex-direction: column; gap: 8px; }
         .jo-materials-card {
@@ -4699,12 +4756,6 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         .jo-materials-grid strong { font-weight: 600; color: var(--ink); word-break: break-word; }
         .jo-materials-span { grid-column: 1 / -1; }
 
-        @media (max-width: 1100px) {
-          .jo-materials-table col.jo-m-remark,
-          .jo-materials-table th:nth-child(7),
-          .jo-materials-table td:nth-child(7) { display: none; }
-        }
-
         @media (max-width: 900px) {
           .jo-receive-row { grid-template-columns: 1fr; }
           .jo-receive-controls { grid-template-columns: 1fr; }
@@ -4718,6 +4769,13 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         }
 
         /* ── Page layout ─────────────────────────────────────────────────── */
+        .jo-page {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          overflow-x: clip;
+          box-sizing: border-box;
+        }
         .jo-form-card-head {
           display: flex;
           justify-content: space-between;
@@ -4752,27 +4810,102 @@ export default function JobOrder({ jobType = "powder_coating" }) {
 
         /* ── Orders table ────────────────────────────────────────────────── */
         .jo-orders-wrap {
+          width: 100% !important;
+          max-width: 100%;
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
+          box-sizing: border-box;
         }
-        .jo-orders-table { width: 100%; min-width: 0; }
+        .jo-orders-table {
+          width: 100% !important;
+          min-width: 100% !important;
+          table-layout: fixed;
+          border-collapse: collapse;
+        }
         .jo-orders-table th {
-          padding: 6px 8px;
+          padding: 8px 6px;
           font-size: 9.5px;
-          line-height: 1.2;
+          line-height: 1.25;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .jo-orders-table td {
-          padding: 6px 8px;
+          padding: 8px 6px;
           font-size: 12px;
-          line-height: 1.3;
+          line-height: 1.35;
+          vertical-align: middle;
+          overflow: hidden;
+        }
+        .jo-orders-table .jo-th-filter {
+          max-width: 100%;
+        }
+        /* Fixed cols stay compact; From / To / QC grow to fill the card */
+        .jo-orders-table col.jo-col-challan { width: 78px; }
+        .jo-orders-table col.jo-col-date { width: 86px; }
+        .jo-orders-table col.jo-col-from { width: 22%; }
+        .jo-orders-table col.jo-col-to { width: 20%; }
+        .jo-orders-table col.jo-col-vehicle { width: 80px; }
+        .jo-orders-table col.jo-col-issued { width: 80px; }
+        .jo-orders-table col.jo-col-qty { width: 52px; }
+        .jo-orders-table col.jo-col-expected { width: 86px; }
+        .jo-orders-table col.jo-col-qc { width: 16%; }
+        .jo-orders-table col.jo-col-status { width: 118px; }
+        .jo-orders-table col.jo-col-act { width: 96px; }
+        .jo-orders-table td.jo-td-date,
+        .jo-orders-table td.jo-td-qty,
+        .jo-orders-table td.jo-td-expected {
+          white-space: nowrap;
+          overflow-wrap: normal;
+          word-break: normal;
+        }
+        .jo-orders-table td.jo-td-qc {
+          overflow: hidden;
+        }
+        .jo-orders-table td.jo-td-qc .jo-qc-text {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 11px;
+          color: var(--text-2);
+        }
+        .jo-orders-table td.jo-td-clip {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .jo-orders-table td.jo-col-status {
+          white-space: nowrap;
+        }
+        .jo-orders-table th.jo-col-act,
+        .jo-orders-table td.jo-col-act {
+          width: 96px;
+          min-width: 96px;
+          overflow: visible;
+        }
+        .jo-orders-table tbody tr.is-open td {
+          background: var(--paper-dim);
+        }
+        .jo-status-pill {
+          display: inline-block;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-size: 11px;
+          font-weight: 700;
+          padding: 3px 8px;
+          border-radius: 12px;
+          white-space: nowrap;
+          text-transform: capitalize;
           vertical-align: middle;
         }
         .jo-order-actions {
           display: flex;
           gap: 4px;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
           align-items: center;
-          max-width: 280px;
+          justify-content: flex-end;
         }
         .jo-order-actions .btn {
           height: 28px;
@@ -4782,14 +4915,59 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           flex-shrink: 0;
           box-sizing: border-box;
         }
-        .jo-order-actions .btn-icon {
-          width: 28px;
-          padding: 0;
-          justify-content: center;
+        .jo-more-wrap {
+          position: relative;
         }
-        .jo-detail-cell {
+        .jo-more-btn {
+          width: 28px;
+          padding: 0 !important;
+          justify-content: center;
+          font-size: 18px !important;
+          line-height: 1;
+          font-weight: 700;
+        }
+        .jo-more-btn.is-open {
+          background: var(--paper-dim);
+          border-color: var(--line);
+        }
+        .jo-more-menu {
+          position: absolute;
+          top: calc(100% + 4px);
+          right: 0;
+          z-index: 40;
+          min-width: 132px;
+          padding: 4px;
+          border: 1px solid var(--line);
+          border-radius: 8px;
           background: #fff;
-          padding: 4px 8px 2px !important;
+          box-shadow: 0 8px 22px rgba(28, 26, 22, 0.14);
+        }
+        .jo-more-item {
+          display: block;
+          width: 100%;
+          text-align: left;
+          border: none;
+          background: transparent;
+          font: inherit;
+          font-size: 12.5px;
+          font-weight: 600;
+          color: var(--ink);
+          padding: 8px 10px;
+          border-radius: 6px;
+          cursor: pointer;
+        }
+        .jo-more-item:hover { background: var(--paper-dim); }
+        .jo-more-item.is-primary { color: var(--teal-dark); }
+        .jo-more-item.is-danger { color: var(--red, #b42318); }
+        .jo-orders-table td.jo-detail-cell {
+          position: relative;
+          z-index: 1;
+          background: var(--paper-dim) !important;
+          padding: 12px !important;
+          overflow: visible !important;
+        }
+        .jo-orders-table td.jo-detail-cell[colspan] {
+          width: 100%;
         }
         .jo-orders-mobile { display: none; flex-direction: column; gap: 10px; }
         .jo-order-card {
@@ -4853,6 +5031,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           align-items: center;
           justify-content: center;
           padding: 20px;
+          overflow-x: hidden;
           overflow-y: auto;
         }
         .jo-modal-overlay--high { z-index: 1100; }
@@ -4868,6 +5047,62 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           overflow: hidden;
         }
         .jo-modal-panel--lg { max-width: 980px; }
+        /* View details: full available width; tables scroll inside if needed */
+        .jo-modal-panel--view {
+          width: 100%;
+          max-width: 1280px;
+          min-width: 0;
+        }
+        .jo-modal-panel--view .jo-modal-header,
+        .jo-modal-panel--view .jo-modal-body {
+          width: 100%;
+          box-sizing: border-box;
+        }
+        .jo-modal-panel--view .jo-meta-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          width: 100%;
+        }
+        .jo-modal-panel--view .jo-meta-grid > div {
+          min-width: 0;
+          word-break: break-word;
+        }
+        .jo-view-items-wrap,
+        .jo-view-qc-wrap {
+          width: 100%;
+          max-width: 100%;
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch;
+        }
+        .jo-view-items-wrap table,
+        .jo-view-qc-wrap table {
+          width: 100%;
+          min-width: 980px;
+          table-layout: fixed;
+        }
+        .jo-view-items-wrap th,
+        .jo-view-items-wrap td,
+        .jo-view-qc-wrap th,
+        .jo-view-qc-wrap td {
+          padding: 8px 8px;
+          vertical-align: middle;
+        }
+        .jo-view-items-wrap th,
+        .jo-view-qc-wrap th {
+          white-space: normal;
+          line-height: 1.2;
+        }
+        .jo-view-items-wrap td.num,
+        .jo-view-qc-wrap td.num {
+          white-space: nowrap;
+        }
+        .jo-view-items-wrap td:nth-child(2),
+        .jo-view-items-wrap td:nth-child(8),
+        .jo-view-items-wrap td:nth-child(12),
+        .jo-view-items-wrap td:nth-child(13),
+        .jo-view-items-wrap td:nth-child(14) {
+          white-space: normal;
+          word-break: break-word;
+        }
         .jo-modal-panel--md { max-width: 720px; }
         .jo-modal-header {
           display: flex;
@@ -4940,9 +5175,20 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           line-height: 1.4;
         }
 
-        @media (max-width: 1100px) {
+        /* Hide lower-priority columns so Status + Actions stay on screen */
+        @media (max-width: 1400px) {
           .jo-col-secondary { display: none !important; }
-          .jo-order-actions { max-width: 220px; }
+          .jo-orders-table col.jo-col-from { width: 28%; }
+          .jo-orders-table col.jo-col-to { width: 24%; }
+          .jo-orders-table col.jo-col-qc { width: 20%; }
+        }
+
+        @media (max-width: 1100px) {
+          .jo-col-tablet-hide { display: none !important; }
+          .jo-orders-table col.jo-col-to { width: 40%; }
+          .jo-orders-table col.jo-col-status { width: 130px; }
+          .jo-materials-table col.jo-m-num { width: 56px; }
+          .jo-materials-table col.jo-m-qty { width: 72px; }
         }
 
         @media (max-width: 900px) {
@@ -4952,7 +5198,6 @@ export default function JobOrder({ jobType = "powder_coating" }) {
             min-width: 0;
             justify-content: center;
           }
-          .jo-col-tablet-hide { display: none !important; }
           .jo-orders-desktop { display: none !important; }
           .jo-orders-mobile { display: flex; }
           .jo-order-card-actions .jo-order-actions {
@@ -4972,6 +5217,17 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           .jo-modal-panel {
             max-height: calc(100vh - 24px);
             overflow: hidden;
+          }
+          .jo-modal-panel--view {
+            width: 100%;
+            max-width: 100%;
+          }
+          .jo-modal-panel--view .jo-meta-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .jo-view-items-wrap table,
+          .jo-view-qc-wrap table {
+            min-width: 860px;
           }
           .jo-modal-header {
             padding: 14px 16px;
@@ -5330,9 +5586,6 @@ export default function JobOrder({ jobType = "powder_coating" }) {
             <h3 style={{ margin: 0 }}>
               {meta.listTitle} <span className="pill-count">{visible.length}</span>
             </h3>
-            <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "var(--text-2)" }}>
-              Click a challan for material details.
-            </p>
           </div>
           <button
             type="button"
@@ -5350,18 +5603,32 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           <>
           <div className="tablewrap jo-orders-wrap jo-orders-desktop">
             <table className="jo-orders-table">
+              <colgroup>
+                <col className="jo-col-challan" />
+                <col className="jo-col-date" />
+                <col className="jo-col-from jo-col-tablet-hide" />
+                <col className="jo-col-to" />
+                <col className="jo-col-vehicle jo-col-secondary" />
+                <col className="jo-col-issued jo-col-secondary" />
+                <col className="jo-col-qty jo-col-tablet-hide" />
+                <col className="jo-col-qty jo-col-tablet-hide" />
+                <col className="jo-col-expected jo-col-secondary" />
+                <col className="jo-col-qc jo-col-tablet-hide" />
+                <col className="jo-col-status" />
+                <col className="jo-col-act" />
+              </colgroup>
               <thead
                 style={{
                   position: "sticky",
                   top: 0,
-                  zIndex: 2,
+                  zIndex: 3,
                   background: "var(--paper-dim)",
                 }}
               >
                 <tr>
                   <th>
                     <span className="jo-th-filter">
-                      Challan No{" "}
+                      Challan{" "}
                       <ColFilter
                         values={orders.map((o) => o.srNo)}
                         selected={colFilters.challanNo}
@@ -5409,7 +5676,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                   </th>
                   <th className="jo-col-secondary">
                     <span className="jo-th-filter">
-                      Vehicle No{" "}
+                      Vehicle{" "}
                       <ColFilter
                         values={orders.map((o) => o.vehicleNo)}
                         selected={colFilters.vehicleNo}
@@ -5433,7 +5700,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                   </th>
                   <th className="num jo-col-tablet-hide">
                     <span className="jo-th-filter">
-                      Dispatched Qty{" "}
+                      Disp{" "}
                       <ColFilter
                         values={orders.map((o) =>
                           String(orderDispatchedQty(o)),
@@ -5447,7 +5714,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                   </th>
                   <th className="num jo-col-tablet-hide">
                     <span className="jo-th-filter">
-                      Received Qty{" "}
+                      Recv{" "}
                       <ColFilter
                         values={orders.map((o) => String(orderReceivedQty(o)))}
                         selected={colFilters.receivedQty}
@@ -5459,7 +5726,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                   </th>
                   <th className="jo-col-secondary">
                     <span className="jo-th-filter">
-                      Vendor Expected{" "}
+                      Expected{" "}
                       <ColFilter
                         values={orders.map((o) => vendorExpectedLabel(o))}
                         selected={colFilters.vendorExpected}
@@ -5469,7 +5736,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                       />
                     </span>
                   </th>
-                  <th className="jo-col-tablet-hide">Vendor / QC</th>
+                  <th className="jo-col-tablet-hide">QC</th>
                   <th>
                     <span className="jo-th-filter">
                       Status{" "}
@@ -5482,7 +5749,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                       />
                     </span>
                   </th>
-                  <th></th>
+                  <th className="jo-col-act">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -5501,43 +5768,42 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                   return (
                     <Fragment key={order._id}>
                     <tr
+                      className={open ? "is-open" : undefined}
                       onClick={() => setOpenOrderId(open ? null : order._id)}
                       style={{ cursor: "pointer", background: open ? "var(--paper-dim)" : undefined }}
                     >
-                      <td className="mono" style={{ fontWeight: 700 }}>
+                      <td className="mono jo-td-clip" style={{ fontWeight: 700 }}>
                         {open ? "▾ " : "▸ "}{order.srNo}
                       </td>
-                      <td>{formatDate(order.date)}</td>
-                      <td className="jo-col-tablet-hide">{order.sendFromName || "—"}</td>
-                      <td style={{ fontWeight: 500 }}>{order.vendorName}</td>
-                      <td className="jo-col-secondary">{order.vehicleNo || "—"}</td>
-                      <td className="jo-col-secondary">{order.issuedBy || "—"}</td>
-                      <td className="num jo-col-tablet-hide">{dispatchedQty}</td>
-                      <td className="num jo-col-tablet-hide">{receivedQtyTotal}</td>
-                      <td className="jo-col-secondary">
+                      <td className="jo-td-date">{formatDate(order.date)}</td>
+                      <td className="jo-col-tablet-hide jo-td-clip" title={order.sendFromName || ""}>
+                        {order.sendFromName || "—"}
+                      </td>
+                      <td className="jo-td-clip" style={{ fontWeight: 500 }} title={order.vendorName || ""}>
+                        {order.vendorName}
+                      </td>
+                      <td className="jo-col-secondary jo-td-clip">{order.vehicleNo || "—"}</td>
+                      <td className="jo-col-secondary jo-td-clip">{order.issuedBy || "—"}</td>
+                      <td className="num jo-col-tablet-hide jo-td-qty">{dispatchedQty}</td>
+                      <td className="num jo-col-tablet-hide jo-td-qty">{receivedQtyTotal}</td>
+                      <td className="jo-col-secondary jo-td-expected">
                         {String(order.vendorExpectedDate || "").trim()
                           ? formatDate(order.vendorExpectedDate)
                           : <span style={{ color: "var(--text-3)" }}>—</span>}
                       </td>
-                      <td className="jo-col-tablet-hide" style={{ fontSize: 12, color: "var(--text-2)", maxWidth: 220 }}>
-                        {qcSummary(order)}
+                      <td className="jo-col-tablet-hide jo-td-qc" title={qcSummary(order)}>
+                        <span className="jo-qc-text">{qcSummary(order)}</span>
                       </td>
-                      <td>
+                      <td className="jo-col-status">
                         <span
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            padding: "3px 10px",
-                            borderRadius: 12,
-                            background: sc.bg,
-                            color: sc.color,
-                            textTransform: "capitalize",
-                          }}
+                          className="jo-status-pill"
+                          title={statusLabel(order)}
+                          style={{ background: sc.bg, color: sc.color }}
                         >
                           {statusLabel(order)}
                         </span>
                       </td>
-                      <td onClick={(e) => e.stopPropagation()}>
+                      <td className="jo-col-act" onClick={(e) => e.stopPropagation()}>
                         <OrderActionButtons
                           order={order}
                           hasPending={hasPending}
@@ -5640,6 +5906,6 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

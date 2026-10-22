@@ -22,9 +22,14 @@ const qcRoundSchema = new mongoose.Schema({
   // order = first submission. rework = quantity QC rejected and the vendor sent back.
   origin:       { type: String, enum: ['order', 'rework'], default: 'order' },
   dispatchQty:  { type: Number, default: 0, min: 0 },
+  // Sent back to vendor for rework (can be re-submitted).
   rejectedQty:  { type: Number, default: 0, min: 0 },
+  // Permanently rejected / scrap — not sent for rework.
+  scrapQty:     { type: Number, default: 0, min: 0 },
   // Why QC sent this quantity to rework.
   reworkRemark: { type: String, default: '' },
+  // Why QC permanently rejected this quantity.
+  scrapRemark:  { type: String, default: '' },
   // True when QC skipped inspection and accepted as ready to dispatch.
   skipped:      { type: Boolean, default: false },
   // Why QC skipped quality checking (required when skipped).

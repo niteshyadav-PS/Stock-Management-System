@@ -30,6 +30,11 @@ const NAV_SECTIONS = [
         roles: ["vendor"],
       },
       {
+        label: "Job Order Dashboard",
+        path: "/job-orders/dashboard",
+        roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
+      },
+      {
         label: "Powder Coating",
         path: "/job-orders",
         roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],

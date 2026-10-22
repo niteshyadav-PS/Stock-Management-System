@@ -160,7 +160,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
   const [qcDialog, setQcDialog] = useState(null); // { type, orderId, itemIndex? }
   const [qcDialogErr, setQcDialogErr] = useState("");
   const [qcDialogBusy, setQcDialogBusy] = useState(false);
-  const [bulkDrafts, setBulkDrafts] = useState({}); // { [itemIndex]: { dispatch, rejected, remark } }
+  const [bulkDrafts, setBulkDrafts] = useState({}); // check_all / vendor_update_all drafts by itemIndex
 
   useEffect(() => {
     if (lockedJobType) setTypeFilter(lockedJobType);
@@ -208,7 +208,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     };
   }, [editRow, ackOrder, qcDialog]);
 
-  function openQcCheck(order, itemIndex) {
+  function openQcAccept(order, itemIndex) {
     const item = order?.items?.[itemIndex];
     if (!item || !pendingRounds(item).length) {
       setMsg({ text: "Nothing is waiting for QC on this material yet.", ok: false });
@@ -216,9 +216,41 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     }
     const key = `${order._id}-${itemIndex}`;
     setRowError(key, "");
-    setDraft(key, { dispatch: String(pendingReadyQty(item)), rejected: "", remark: "" });
+    setDraft(key, { acceptQty: String(pendingReadyQty(item)) });
     setQcDialogErr("");
-    setQcDialog({ type: "check", orderId: order._id, itemIndex });
+    setQcDialog({ type: "accept", orderId: order._id, itemIndex });
+  }
+
+  function openQcRework(order, itemIndex) {
+    const item = order?.items?.[itemIndex];
+    if (!item || !pendingRounds(item).length) {
+      setMsg({ text: "Nothing is waiting for QC to send for rework.", ok: false });
+      return;
+    }
+    const key = `${order._id}-${itemIndex}`;
+    setRowError(key, "");
+    setDraft(key, {
+      reworkQty: String(pendingReadyQty(item)),
+      remark: "",
+    });
+    setQcDialogErr("");
+    setQcDialog({ type: "rework", orderId: order._id, itemIndex });
+  }
+
+  function openQcReject(order, itemIndex) {
+    const item = order?.items?.[itemIndex];
+    if (!item || !pendingRounds(item).length) {
+      setMsg({ text: "Nothing is waiting for QC to reject on this material.", ok: false });
+      return;
+    }
+    const key = `${order._id}-${itemIndex}`;
+    setRowError(key, "");
+    setDraft(key, {
+      rejectQty: String(pendingReadyQty(item)),
+      remark: "",
+    });
+    setQcDialogErr("");
+    setQcDialog({ type: "reject", orderId: order._id, itemIndex });
   }
 
   function openQcSkip(order, itemIndex) {
@@ -234,6 +266,20 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     setDraft(key, { skipRemark: "" });
     setQcDialogErr("");
     setQcDialog({ type: "skip", orderId: order._id, itemIndex });
+  }
+
+  /** @deprecated kept for QC Check all / split dialog */
+  function openQcCheck(order, itemIndex) {
+    const item = order?.items?.[itemIndex];
+    if (!item || !pendingRounds(item).length) {
+      setMsg({ text: "Nothing is waiting for QC on this material yet.", ok: false });
+      return;
+    }
+    const key = `${order._id}-${itemIndex}`;
+    setRowError(key, "");
+    setDraft(key, { dispatch: String(pendingReadyQty(item)), rejected: "", scrap: "", remark: "", scrapRemark: "" });
+    setQcDialogErr("");
+    setQcDialog({ type: "check", orderId: order._id, itemIndex });
   }
 
   function openQcCheckAll(order) {
@@ -252,8 +298,10 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     const next = {};
     for (const { item, itemIndex } of pendingIndexes) {
       next[itemIndex] = {
-        dispatch: String(pendingReadyQty(item)),
-        rejected: "",
+        accept: String(pendingReadyQty(item)),
+        rework: "",
+        reject: "",
+        skip: false,
         remark: "",
       };
     }
@@ -261,6 +309,48 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     setQcDialogErr("");
     setOpenChallans((prev) => ({ ...prev, [order._id]: true }));
     setQcDialog({ type: "check_all", orderId: order._id });
+  }
+
+  function vendorItemLimits(item) {
+    const orderQty = Number(item?.qty) || 0;
+    const sent = submittedReadyQty(item);
+    const remaining = Math.max(0, Math.round((orderQty - sent) * 1000) / 1000);
+    const rework = reworkQty(item);
+    return { orderQty, sent, remaining, rework };
+  }
+
+  function orderVendorUpdateCount(order) {
+    return (order?.items || []).filter((item) => {
+      const { remaining, rework } = vendorItemLimits(item);
+      return remaining > 0.001 || rework > 0.001;
+    }).length;
+  }
+
+  function openVendorUpdateAll(order) {
+    if (!isVendorAcknowledged(order)) {
+      setMsg({ text: "Receive this challan first, then update items.", ok: false });
+      return;
+    }
+    const items = order.items || [];
+    if (!items.length) {
+      setMsg({ text: "This challan has no items.", ok: false });
+      return;
+    }
+    const actionable = items
+      .map((item, itemIndex) => ({ item, itemIndex, ...vendorItemLimits(item) }))
+      .filter(({ remaining, rework }) => remaining > 0.001 || rework > 0.001);
+    if (!actionable.length) {
+      setMsg({ text: "All items on this challan are already submitted.", ok: false });
+      return;
+    }
+    const next = {};
+    for (const { itemIndex } of actionable) {
+      next[itemIndex] = { qty: "", rework: "" };
+    }
+    setBulkDrafts(next);
+    setQcDialogErr("");
+    setOpenChallans((prev) => ({ ...prev, [order._id]: true }));
+    setQcDialog({ type: "vendor_update_all", orderId: order._id });
   }
 
   function orderPendingQcCount(order) {
@@ -464,14 +554,20 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       });
       await load();
       if (onUpdated) onUpdated();
-      if (isAdmin) setEditRow(null);
+      setEditRow(null);
       if (action === "inspect" || action === "skip_qc") {
         setQcDialog(null);
         setQcDialogErr("");
       }
       setMsg({
         text: action === "inspect"
-          ? "QC saved. Dispatch and rework quantities are recorded."
+          ? (Number(body?.scrapQty) > 0 && !(Number(body?.dispatchQty) > 0) && !(Number(body?.rejectedQty) > 0)
+            ? "Rejected. Quantity marked as scrap."
+            : Number(body?.rejectedQty) > 0 && !(Number(body?.dispatchQty) > 0) && !(Number(body?.scrapQty) > 0)
+            ? "Sent for rework. Vendor can fix and resubmit."
+            : Number(body?.dispatchQty) > 0 && !(Number(body?.rejectedQty) > 0) && !(Number(body?.scrapQty) > 0)
+            ? "Accepted. Quantity marked ready to dispatch."
+            : "QC saved.")
           : action === "skip_qc"
           ? "QC skipped. Quantity marked ready to dispatch."
           : action === "send_rework"
@@ -496,7 +592,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     const remark = String(draft.remark || "").trim();
     setQcDialogErr("");
     if (!Number.isFinite(dispatch) || dispatch < 0 || !Number.isFinite(rejected) || rejected < 0) {
-      setQcDialogErr("Enter dispatch and rework quantities.");
+      setQcDialogErr("Enter dispatch and reject quantities.");
       return;
     }
     const inspected = Math.round((dispatch + rejected) * 1000) / 1000;
@@ -505,7 +601,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       return;
     }
     if (rejected > 0.001 && !remark) {
-      setQcDialogErr("Enter a remark for the rework quantity.");
+      setQcDialogErr("Enter a remark for the rejected quantity.");
       return;
     }
     if (dispatch - sliceQty > 0.001 || rejected - sliceQty > 0.001 || inspected - sliceQty > 0.001) {
@@ -521,7 +617,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     await submit(row, "inspect", {
       dispatchQty: dispatch,
       rejectedQty: rejected,
+      scrapQty: 0,
       reworkRemark: remark,
+      scrapRemark: "",
     });
   }
 
@@ -545,62 +643,288 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     );
   }
 
+  async function saveQcAcceptFromDialog(row) {
+    const draft = draftFor(row);
+    const sliceQty = pendingReadyQty(row.item);
+    const acceptQty = draft.acceptQty === "" || draft.acceptQty == null ? 0 : Number(draft.acceptQty);
+    setQcDialogErr("");
+    if (!Number.isFinite(acceptQty) || acceptQty <= 0) {
+      setQcDialogErr("Enter the quantity to accept.");
+      return;
+    }
+    if (acceptQty - sliceQty > 0.001) {
+      setQcDialogErr(`Cannot accept more than ${formatQty(sliceQty)}.`);
+      return;
+    }
+    const orderQty = Number(row.item.qty) || 0;
+    const alreadyDispatch = inspectedTotals(row.item).dispatch;
+    const dispatchRoom = Math.round((orderQty - alreadyDispatch) * 1000) / 1000;
+    if (acceptQty - dispatchRoom > 0.001) {
+      setQcDialogErr(`Cannot accept more than ${formatQty(Math.max(0, dispatchRoom))}.`);
+      return;
+    }
+    await submit(
+      row,
+      "inspect",
+      { dispatchQty: acceptQty, rejectedQty: 0, scrapQty: 0, reworkRemark: "", scrapRemark: "" },
+      `Accept ${formatQty(acceptQty)} ${row.item.unit || "NOS"} as ready to dispatch?`,
+    );
+  }
+
+  async function saveQcReworkFromDialog(row) {
+    const draft = draftFor(row);
+    const sliceQty = pendingReadyQty(row.item);
+    const qty = draft.reworkQty === "" || draft.reworkQty == null ? 0 : Number(draft.reworkQty);
+    const remark = String(draft.remark || "").trim();
+    setQcDialogErr("");
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setQcDialogErr("Enter the quantity to send for rework.");
+      return;
+    }
+    if (qty - sliceQty > 0.001) {
+      setQcDialogErr(`Cannot send more than ${formatQty(sliceQty)} for rework.`);
+      return;
+    }
+    if (!remark) {
+      setQcDialogErr("Enter a remark for rework.");
+      return;
+    }
+    await submit(
+      row,
+      "inspect",
+      { dispatchQty: 0, rejectedQty: qty, scrapQty: 0, reworkRemark: remark, scrapRemark: "" },
+      `Send ${formatQty(qty)} ${row.item.unit || "NOS"} back for rework?\n\nReason: ${remark}`,
+    );
+  }
+
+  async function saveQcRejectFromDialog(row) {
+    const draft = draftFor(row);
+    const sliceQty = pendingReadyQty(row.item);
+    const rejectQty = draft.rejectQty === "" || draft.rejectQty == null ? 0 : Number(draft.rejectQty);
+    const remark = String(draft.remark || "").trim();
+    setQcDialogErr("");
+    if (!Number.isFinite(rejectQty) || rejectQty <= 0) {
+      setQcDialogErr("Enter the quantity to reject.");
+      return;
+    }
+    if (rejectQty - sliceQty > 0.001) {
+      setQcDialogErr(`Cannot reject more than ${formatQty(sliceQty)}.`);
+      return;
+    }
+    if (!remark) {
+      setQcDialogErr("Enter a remark for the rejection.");
+      return;
+    }
+    await submit(
+      row,
+      "inspect",
+      {
+        dispatchQty: 0,
+        rejectedQty: 0,
+        scrapQty: rejectQty,
+        reworkRemark: "",
+        scrapRemark: remark,
+      },
+      `Permanently reject ${formatQty(rejectQty)} ${row.item.unit || "NOS"} as scrap?\n\nReason: ${remark}`,
+    );
+  }
+
   async function saveQcCheckAllFromDialog(order) {
     const pendingItems = (order.items || [])
       .map((item, itemIndex) => ({ item, itemIndex }))
       .filter(({ item }) => pendingRounds(item).length > 0);
     setQcDialogErr("");
+
+    const actions = [];
     for (const { item, itemIndex } of pendingItems) {
       const d = bulkDrafts[itemIndex] || {};
       const sliceQty = pendingReadyQty(item);
       const orderQty = Number(item.qty) || 0;
-      const dispatch = d.dispatch === "" || d.dispatch == null ? 0 : Number(d.dispatch);
-      const rejected = d.rejected === "" || d.rejected == null ? 0 : Number(d.rejected);
       const remark = String(d.remark || "").trim();
-      const inspected = Math.round((dispatch + rejected) * 1000) / 1000;
-      if (!Number.isFinite(dispatch) || dispatch < 0 || !Number.isFinite(rejected) || rejected < 0 || inspected <= 0) {
-        setQcDialogErr(`${item.description}: enter dispatch / rework quantities.`);
+      const skip = !!d.skip;
+
+      if (skip) {
+        if (!remark) {
+          setQcDialogErr(`${item.description}: remark required to skip QC.`);
+          return;
+        }
+        actions.push({
+          itemIndex,
+          description: item.description,
+          kind: "skip",
+          skipRemark: remark,
+        });
+        continue;
+      }
+
+      const acceptRaw = d.accept !== undefined && d.accept !== null
+        ? d.accept
+        : (d.dispatch !== undefined && d.dispatch !== null ? d.dispatch : "");
+      const accept = acceptRaw === "" ? 0 : Number(acceptRaw);
+      const rework = d.rework === "" || d.rework == null ? 0 : Number(d.rework);
+      const reject = d.reject === "" || d.reject == null ? 0 : Number(d.reject);
+      if (
+        !Number.isFinite(accept) || accept < 0
+        || !Number.isFinite(rework) || rework < 0
+        || !Number.isFinite(reject) || reject < 0
+      ) {
+        setQcDialogErr(`${item.description}: enter accept / rework / reject quantities.`);
         return;
       }
-      if (rejected > 0.001 && !remark) {
+      const inspected = Math.round((accept + rework + reject) * 1000) / 1000;
+      if (inspected <= 0) {
+        setQcDialogErr(`${item.description}: enter at least one of Accept, Rework, or Reject — or tick Skip.`);
+        return;
+      }
+      if (rework > 0.001 && !remark) {
         setQcDialogErr(`${item.description}: remark required for rework.`);
         return;
       }
-      if (dispatch - sliceQty > 0.001 || rejected - sliceQty > 0.001 || inspected - sliceQty > 0.001) {
+      if (reject > 0.001 && !remark) {
+        setQcDialogErr(`${item.description}: remark required for reject.`);
+        return;
+      }
+      if (accept - sliceQty > 0.001 || rework - sliceQty > 0.001 || reject - sliceQty > 0.001 || inspected - sliceQty > 0.001) {
         setQcDialogErr(`${item.description}: cannot update more than ${formatQty(sliceQty)}.`);
         return;
       }
       const dispatchRoom = Math.round((orderQty - inspectedTotals(item).dispatch) * 1000) / 1000;
-      if (dispatch - dispatchRoom > 0.001) {
-        setQcDialogErr(`${item.description}: cannot update more than ${formatQty(Math.max(0, dispatchRoom))}.`);
+      if (accept - dispatchRoom > 0.001) {
+        setQcDialogErr(`${item.description}: cannot accept more than ${formatQty(Math.max(0, dispatchRoom))}.`);
         return;
       }
+      actions.push({
+        itemIndex,
+        description: item.description,
+        kind: "inspect",
+        dispatchQty: accept,
+        rejectedQty: rework,
+        scrapQty: reject,
+        reworkRemark: rework > 0.001 ? remark : "",
+        scrapRemark: reject > 0.001 ? remark : "",
+      });
     }
-    if (!window.confirm(`Save QC for ${pendingItems.length} item${pendingItems.length === 1 ? "" : "s"} on challan ${order.srNo}?`)) {
+
+    if (!actions.length) {
+      setQcDialogErr("Nothing to save.");
+      return;
+    }
+    if (!window.confirm(`Save QC for ${actions.length} item${actions.length === 1 ? "" : "s"} on challan ${order.srNo}?`)) {
       return;
     }
     setQcDialogBusy(true);
     setMsg({ text: "", ok: true });
     try {
-      for (const { itemIndex } of pendingItems) {
-        const d = bulkDrafts[itemIndex] || {};
-        const dispatch = d.dispatch === "" || d.dispatch == null ? 0 : Number(d.dispatch);
-        const rejected = d.rejected === "" || d.rejected == null ? 0 : Number(d.rejected);
-        await updateJobOrderQcStage(order._id, {
+      for (const step of actions) {
+        if (step.kind === "skip") {
+          await updateJobOrderQcStage(order._id, {
+            itemIndex: step.itemIndex,
+            action: "skip_qc",
+            skipRemark: step.skipRemark,
+          });
+        } else {
+          await updateJobOrderQcStage(order._id, {
+            itemIndex: step.itemIndex,
+            action: "inspect",
+            dispatchQty: step.dispatchQty,
+            rejectedQty: step.rejectedQty,
+            scrapQty: step.scrapQty,
+            reworkRemark: step.reworkRemark,
+            scrapRemark: step.scrapRemark,
+          });
+        }
+      }
+      setQcDialog(null);
+      setBulkDrafts({});
+      await load();
+      if (onUpdated) onUpdated();
+      setMsg({ text: `QC saved for ${actions.length} item${actions.length === 1 ? "" : "s"}.`, ok: true });
+    } catch (err) {
+      setQcDialogErr(err.message || "Could not save QC for all items.");
+      setMsg({ text: err.message, ok: false });
+      await load();
+    } finally {
+      setQcDialogBusy(false);
+    }
+  }
+
+  async function saveVendorUpdateAllFromDialog(order) {
+    const rows = (order.items || [])
+      .map((item, itemIndex) => ({ item, itemIndex, ...vendorItemLimits(item) }))
+      .filter(({ remaining, rework }) => remaining > 0.001 || rework > 0.001);
+
+    setQcDialogErr("");
+    const actions = [];
+    for (const { item, itemIndex, remaining, rework } of rows) {
+      const d = bulkDrafts[itemIndex] || {};
+      const qtyRaw = d.qty === "" || d.qty == null ? null : Number(d.qty);
+      const reworkRaw = d.rework === "" || d.rework == null ? null : Number(d.rework);
+      const hasQty = qtyRaw != null && Number.isFinite(qtyRaw) && qtyRaw > 0;
+      const hasRework = reworkRaw != null && Number.isFinite(reworkRaw) && reworkRaw > 0;
+
+      if (!hasQty && !hasRework) continue;
+
+      if (hasQty) {
+        if (qtyRaw - remaining > 0.001) {
+          setQcDialogErr(`${item.description}: lot qty cannot exceed ${formatQty(remaining)}.`);
+          return;
+        }
+        actions.push({
           itemIndex,
-          action: "inspect",
-          dispatchQty: dispatch,
-          rejectedQty: rejected,
-          reworkRemark: String(d.remark || "").trim(),
+          description: item.description,
+          action: "request_qc",
+          readyQty: qtyRaw,
+        });
+      }
+      if (hasRework) {
+        if (rework <= 0.001) {
+          setQcDialogErr(`${item.description}: no rework quantity available.`);
+          return;
+        }
+        if (reworkRaw - rework > 0.001) {
+          setQcDialogErr(`${item.description}: rework qty cannot exceed ${formatQty(rework)}.`);
+          return;
+        }
+        actions.push({
+          itemIndex,
+          description: item.description,
+          action: "send_rework",
+          readyQty: reworkRaw,
+        });
+      }
+    }
+
+    if (!actions.length) {
+      setQcDialogErr("Enter a ready lot or rework quantity for at least one item.");
+      return;
+    }
+
+    if (!window.confirm(
+      `Submit ${actions.length} update${actions.length === 1 ? "" : "s"} on challan ${order.srNo}? Lots cannot be changed after sending.`,
+    )) {
+      return;
+    }
+
+    setQcDialogBusy(true);
+    setMsg({ text: "", ok: true });
+    try {
+      for (const step of actions) {
+        await updateJobOrderQcStage(order._id, {
+          itemIndex: step.itemIndex,
+          action: step.action,
+          readyQty: step.readyQty,
         });
       }
       setQcDialog(null);
       setBulkDrafts({});
       await load();
       if (onUpdated) onUpdated();
-      setMsg({ text: `QC saved for ${pendingItems.length} item${pendingItems.length === 1 ? "" : "s"}.`, ok: true });
+      setMsg({
+        text: `Updated ${actions.length} item action${actions.length === 1 ? "" : "s"} on challan ${order.srNo}.`,
+        ok: true,
+      });
     } catch (err) {
-      setQcDialogErr(err.message || "Could not save QC for all items.");
+      setQcDialogErr(err.message || "Could not update all items.");
       setMsg({ text: err.message, ok: false });
       await load();
     } finally {
@@ -627,29 +951,39 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         </button>
       );
     }
-    if (isAdmin && !inPopup) {
+    // Desktop table: keep one button so controls never crush the row.
+    // Full form opens in the update modal (admin + vendor). QC keeps compact actions inline.
+    if (!inPopup && (isAdmin || isVendor)) {
       const hasAction =
         pendingRounds(row.item).length > 0
         || reworkQty(row.item) > 0.001
         || Number(row.item.qty) - submittedReadyQty(row.item) > 0.001;
+      const notes = reworkRemarks(row.item);
       return (
-        <button
-          type="button"
-          className="btn btn-in btn-sm"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setRowError(row.key, "");
-            setMsg({ text: "", ok: true });
-            setEditRow({
-              key: row.key,
-              orderId: row.order._id,
-              itemIndex: row.itemIndex,
-            });
-          }}
-        >
-          {hasAction ? "Update" : "View"}
-        </button>
+        <div className="vq-act-compact">
+          <button
+            type="button"
+            className="btn btn-in btn-sm"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setRowError(row.key, "");
+              setMsg({ text: "", ok: true });
+              setEditRow({
+                key: row.key,
+                orderId: row.order._id,
+                itemIndex: row.itemIndex,
+              });
+            }}
+          >
+            {hasAction ? "Update" : "View"}
+          </button>
+          {notes.length > 0 && (
+            <div className="vq-rework-chip" title={notes.map((n) => `Rework ${formatQty(n.qty)}: ${n.remark}`).join(" · ")}>
+              Rework {formatQty(notes.reduce((s, n) => s + (Number(n.qty) || 0), 0))}
+            </div>
+          )}
+        </div>
       );
     }
     const pending = pendingRounds(row.item);
@@ -794,36 +1128,82 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         {canSetReady && orderQty - sent <= 0.001 && rework <= 0.001 && !canInspect && (
           <span className="vq-muted">All quantity submitted</span>
         )}
-        {canInspect && (pending.length > 0 || remaining > 0.001) && (
-          <div className="vq-qc-actions">
-            {pending.length > 0 && (
-              <button
-                type="button"
-                className="btn btn-in btn-sm"
-                disabled={!!busyKey}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  openQcCheck(row.order, row.itemIndex);
-                }}
-              >
-                QC Check
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={!!busyKey}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                openQcSkip(row.order, row.itemIndex);
-              }}
-            >
-              Skip
-            </button>
-          </div>
-        )}
+        {canInspect && (() => {
+          const acknowledged = isVendorAcknowledged(row.order);
+          const hasPending = pending.length > 0;
+          // Skip on unsent qty only after vendor has received the challan.
+          const canSkipUnsent = acknowledged && remaining > 0.001;
+          if (hasPending || canSkipUnsent) {
+            return (
+              <div className="vq-qc-actions">
+                {hasPending && (
+                  <button
+                    type="button"
+                    className="btn btn-in btn-sm"
+                    disabled={!!busyKey}
+                    title="Accept quantity as ready to dispatch"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openQcAccept(row.order, row.itemIndex);
+                    }}
+                  >
+                    Accept
+                  </button>
+                )}
+                {hasPending && (
+                  <button
+                    type="button"
+                    className="btn btn-out btn-sm"
+                    disabled={!!busyKey}
+                    title="Permanently reject as scrap"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openQcReject(row.order, row.itemIndex);
+                    }}
+                  >
+                    Reject
+                  </button>
+                )}
+                {hasPending && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={!!busyKey}
+                    title="Send back to vendor for rework"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openQcRework(row.order, row.itemIndex);
+                    }}
+                  >
+                    Rework
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={!!busyKey}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openQcSkip(row.order, row.itemIndex);
+                  }}
+                >
+                  Skip
+                </button>
+              </div>
+            );
+          }
+          if (!acknowledged) {
+            return <span className="vq-muted">Waiting for vendor</span>;
+          }
+          if (remaining <= 0.001 && !skipRemarks(row.item).length) {
+            return <span className="vq-muted">QC complete</span>;
+          }
+          return null;
+        })()}
         {canInspect && skipRemarks(row.item).length > 0 && (
           <div className="vq-rework-notes">
             {skipRemarks(row.item).map((note, idx) => (
@@ -832,9 +1212,6 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
               </div>
             ))}
           </div>
-        )}
-        {canInspect && !pending.length && remaining <= 0.001 && !skipRemarks(row.item).length && (
-          <span className="vq-muted">QC complete</span>
         )}
         {canSetReady && rework > 0.001 && canInspect && pending.length === 0 && (
           <button
@@ -877,7 +1254,21 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         .vq-embed-head { margin-bottom: 8px; }
         .vq-embed-head h3 { margin: 0 0 2px; font-size: 14px; font-weight: 700; color: var(--ink); }
         .vq-embed-head p { margin: 0; font-size: 12px; color: var(--text-2); }
-        .vq-embed-wrap { margin-bottom: 12px; }
+        .vq-embed-wrap {
+          margin-bottom: 12px;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          overflow-x: clip;
+        }
+        .vq-embed-wrap .card,
+        .vq-embed-wrap .card.card-wide {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+          overflow: hidden;
+        }
         .vq-filters {
           display: flex;
           gap: 8px;
@@ -959,33 +1350,40 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         .vq-party-name { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
         .vq-party-text { font-size: 13px; line-height: 1.45; white-space: pre-line; color: var(--text-2); word-break: break-word; }
         .vq-scroll {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
           overflow-x: auto;
+          overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
+          box-sizing: border-box;
         }
         .vq-table {
           width: 100%;
-          min-width: 1180px;
+          min-width: 0;
+          max-width: 100%;
           border-collapse: collapse;
           table-layout: fixed;
         }
         .vq-table th, .vq-table td {
-          vertical-align: middle;
+          vertical-align: top;
           text-align: left;
-          padding: 8px 8px;
+          padding: 10px 8px;
           border-bottom: 1px solid var(--line);
-          word-break: break-word;
+          overflow: hidden;
         }
         .vq-table th {
           font-size: 10px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.03em;
-          color: #8a8270;
-          white-space: normal;
+          color: #6b6555;
+          white-space: nowrap;
           background: var(--paper-dim);
           line-height: 1.25;
+          vertical-align: middle;
         }
-        .vq-table td { font-size: 12.5px; }
+        .vq-table td { font-size: 12.5px; color: var(--ink); }
         .vq-table td.num {
           text-align: right;
           font-variant-numeric: tabular-nums;
@@ -994,36 +1392,89 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         .vq-table th.num {
           text-align: right;
           font-variant-numeric: tabular-nums;
-          white-space: normal;
         }
         .vq-table th.vq-th-dispatch {
           white-space: normal;
           line-height: 1.2;
-          hyphens: auto;
         }
         .vq-table th.vq-th-act {
           white-space: nowrap;
           text-align: center;
         }
-        .vq-table td.vq-desc { white-space: normal; font-weight: 500; }
-        .vq-table td.vq-act {
+        .vq-table td.vq-desc {
+          font-weight: 500;
+          overflow: hidden;
+          text-overflow: ellipsis;
           white-space: nowrap;
-          vertical-align: middle;
+        }
+        .vq-table td.vq-clip {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .vq-table td.vq-act {
+          white-space: normal;
+          vertical-align: top;
           text-align: center;
+          overflow: visible;
+        }
+        .vq-table td.vq-act .btn {
+          height: 30px;
+          padding: 0 12px;
+          font-size: 12px;
+          max-width: 100%;
+          box-sizing: border-box;
+        }
+        .vq-act-compact {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+        }
+        .vq-rework-chip {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          color: #9a3412;
+          background: #f8ede7;
+          border: 1px solid #efd2c4;
+          border-radius: 999px;
+          padding: 2px 8px;
+          white-space: nowrap;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .vq-table col.vq-col-sr { width: 40px; }
-        .vq-table col.vq-col-desc { width: 16%; }
-        .vq-table col.vq-col-qty { width: 56px; }
-        .vq-table col.vq-col-uom { width: 52px; }
-        .vq-table col.vq-col-process { width: 13%; }
-        .vq-table col.vq-col-project { width: 11%; }
-        .vq-table col.vq-col-remark { width: 10%; }
-        .vq-table col.vq-col-ready { width: 140px; }
-        .vq-table col.vq-col-dispatch { width: 92px; }
-        .vq-table col.vq-col-act { width: 110px; }
+        .vq-table col.vq-col-desc { width: 18%; }
+        .vq-table col.vq-col-qty { width: 58px; }
+        .vq-table col.vq-col-uom { width: 48px; }
+        .vq-table col.vq-col-process { width: 15%; }
+        .vq-table col.vq-col-project { width: 12%; }
+        .vq-table col.vq-col-ready { width: 18%; }
+        .vq-table col.vq-col-dispatch { width: 72px; }
+        .vq-table col.vq-col-act { width: 220px; }
+        .vq-qc-actions .btn-out {
+          background: var(--rust);
+          color: #fff;
+          border-color: var(--rust);
+        }
+        .vq-lots {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          font-size: 11px;
+          white-space: normal;
+          line-height: 1.35;
+          min-width: 0;
+          max-width: 100%;
+          overflow: hidden;
+          color: var(--text-2);
+        }
         .vq-flat { width: 100%; min-width: 760px; border-collapse: collapse; }
         .vq-flat th, .vq-flat td {
-          vertical-align: middle;
+          vertical-align: top;
           text-align: left;
           padding: 10px 12px;
           border-bottom: 1px solid var(--line);
@@ -1033,32 +1484,45 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.04em;
-          color: #8a8270;
+          color: #6b6555;
           white-space: nowrap;
           background: var(--paper-dim);
+          vertical-align: middle;
         }
         .vq-flat td.num, .vq-flat th.num { text-align: right; font-variant-numeric: tabular-nums; }
-        .vq-flat td.vq-act { min-width: 160px; white-space: normal; vertical-align: top; }
-        .vq-update-block { display: flex; flex-direction: column; gap: 6px; }
+        .vq-flat td.vq-act { min-width: 120px; white-space: normal; vertical-align: top; }
+        .vq-update-block {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          width: 100%;
+          padding: 10px 12px;
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          background: var(--paper-dim);
+          box-sizing: border-box;
+        }
         .vq-update-row {
           display: flex;
-          flex-wrap: wrap;
+          flex-direction: column;
+          flex-wrap: nowrap;
           gap: 8px;
-          align-items: center;
+          align-items: stretch;
+          width: 100%;
         }
         .vq-qc-actions {
           display: inline-flex;
           flex-direction: row;
-          flex-wrap: nowrap;
+          flex-wrap: wrap;
           align-items: center;
-          justify-content: flex-start;
+          justify-content: center;
           gap: 6px;
-          width: auto;
+          width: 100%;
         }
         .vq-qc-actions .btn {
           flex: 0 0 auto;
           width: auto;
-          height: 30px;
+          height: 32px;
           padding: 0 12px;
           box-sizing: border-box;
           font-size: 12px;
@@ -1068,11 +1532,11 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           white-space: nowrap;
         }
         .vq-update {
-          display: inline-flex;
+          display: flex;
           flex-direction: column;
-          gap: 6px;
-          align-items: flex-start;
-          width: auto;
+          gap: 10px;
+          align-items: stretch;
+          width: 100%;
         }
         .vq-card-tools {
           display: flex;
@@ -1083,15 +1547,15 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         .vq-bulk-list {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 10px;
           max-height: min(62vh, 520px);
           overflow: auto;
           padding-right: 2px;
         }
         .vq-bulk-item {
           border: 1px solid var(--line);
-          border-radius: 8px;
-          padding: 8px 10px;
+          border-radius: 10px;
+          padding: 12px 14px;
           background: #fff;
         }
         .vq-bulk-item.is-pending,
@@ -1139,6 +1603,163 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+        /* Vendor Update-all: one compact row per item */
+        .vq-vbulk-wrap {
+          width: 100%;
+          overflow-x: auto;
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          background: #fff;
+        }
+        .vq-vbulk-table {
+          width: 100%;
+          min-width: 860px;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+        .vq-vbulk-table th,
+        .vq-vbulk-table td {
+          padding: 10px 8px;
+          border-bottom: 1px solid var(--line);
+          vertical-align: middle;
+          text-align: left;
+          font-size: 12.5px;
+        }
+        .vq-vbulk-table th {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: #6b6555;
+          background: var(--paper-dim);
+          white-space: nowrap;
+        }
+        .vq-vbulk-table th.num,
+        .vq-vbulk-table td.num {
+          text-align: right;
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap;
+        }
+        .vq-vbulk-table tbody tr:last-child td { border-bottom: none; }
+        .vq-vbulk-table tbody tr.is-done { opacity: 0.72; }
+        .vq-vbulk-table col.vq-vb-sr { width: 40px; }
+        .vq-vbulk-table col.vq-vb-item { width: 22%; }
+        .vq-vbulk-table col.vq-vb-qty { width: 72px; }
+        .vq-vbulk-table col.vq-vb-sub { width: 72px; }
+        .vq-vbulk-table col.vq-vb-left { width: 64px; }
+        .vq-vbulk-table col.vq-vb-disp { width: 72px; }
+        .vq-vbulk-table col.vq-vb-lot { width: 110px; }
+        .vq-vbulk-table col.vq-vb-rework { width: 110px; }
+        .vq-vbulk-itemcell {
+          min-width: 0;
+        }
+        .vq-vbulk-itemcell strong {
+          display: block;
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--ink);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .vq-vbulk-itemcell .vq-item-sub {
+          margin-top: 2px;
+          font-size: 11px;
+          color: var(--text-2);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .vq-vbulk-itemcell .vq-rework-line {
+          margin-top: 3px;
+          font-size: 11px;
+          color: #9a3412;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .vq-vbulk-table input {
+          width: 100%;
+          height: 34px;
+          box-sizing: border-box;
+          padding: 4px 8px;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          font: inherit;
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--ink);
+          background: #fff;
+        }
+        .vq-vbulk-table input[type="number"] {
+          -moz-appearance: textfield;
+          appearance: textfield;
+        }
+        .vq-vbulk-table input[type="number"]::-webkit-outer-spin-button,
+        .vq-vbulk-table input[type="number"]::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        .vq-vbulk-table input:focus {
+          outline: none;
+          border-color: var(--teal);
+          box-shadow: 0 0 0 3px rgba(31, 92, 82, 0.12);
+        }
+        .vq-vbulk-table input:disabled {
+          background: var(--paper-dim);
+          color: var(--text-3);
+          font-weight: 500;
+        }
+        .vq-hint {
+          margin: 0 0 12px;
+          padding: 8px 10px;
+          border-radius: 8px;
+          background: var(--paper-dim);
+          border: 1px solid var(--line);
+          font-size: 12px;
+          color: var(--text-2);
+          line-height: 1.4;
+        }
+        .vq-qbulk-table { min-width: 1080px; }
+        .vq-qbulk-table col.vq-qb-sr { width: 36px; }
+        .vq-qbulk-table col.vq-qb-item { width: 18%; }
+        .vq-qbulk-table col.vq-qb-qty { width: 72px; }
+        .vq-qbulk-table col.vq-qb-sub { width: 72px; }
+        .vq-qbulk-table col.vq-qb-qc { width: 70px; }
+        .vq-qbulk-table col.vq-qb-left { width: 64px; }
+        .vq-qbulk-table col.vq-qb-accept { width: 88px; }
+        .vq-qbulk-table col.vq-qb-rework { width: 88px; }
+        .vq-qbulk-table col.vq-qb-reject { width: 88px; }
+        .vq-qbulk-table col.vq-qb-skip { width: 52px; }
+        .vq-qbulk-table col.vq-qb-remark { width: 16%; }
+        .vq-qbulk-table th.vq-qb-skip,
+        .vq-qbulk-table td.vq-qb-skip {
+          text-align: center;
+        }
+        .vq-qbulk-table input[type="checkbox"] {
+          width: 16px;
+          height: 16px;
+          accent-color: var(--teal);
+          cursor: pointer;
+        }
+        .vq-qbulk-table input.is-disabled,
+        .vq-qbulk-table textarea.is-disabled {
+          opacity: 0.45;
+          background: var(--paper-dim);
+        }
+        .vq-qbulk-table textarea {
+          width: 100%;
+          min-height: 34px;
+          max-height: 64px;
+          box-sizing: border-box;
+          padding: 6px 8px;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          font: inherit;
+          font-size: 12px;
+          resize: vertical;
+          background: #fff;
         }
         .vq-bulk-chip {
           flex: 0 0 auto;
@@ -1265,17 +1886,23 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           .vq-check-fields { grid-template-columns: 1fr; }
         }
         .vq-update input {
-          width: 140px;
+          width: 100%;
           max-width: 100%;
-          min-width: 110px;
-          height: 34px;
+          min-width: 0;
+          height: 36px;
           box-sizing: border-box;
-          padding: 6px 8px;
+          padding: 6px 10px;
           border: 1px solid var(--line);
           border-radius: 6px;
           font: inherit;
           font-size: 13px;
           background: #fff;
+        }
+        .vq-update .btn {
+          width: 100%;
+          height: 36px;
+          justify-content: center;
+          box-sizing: border-box;
         }
         .vq-remark {
           width: 100%;
@@ -1292,14 +1919,17 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         .vq-rework-notes {
           display: flex;
           flex-direction: column;
-          gap: 4px;
-          margin-top: 4px;
+          gap: 6px;
         }
         .vq-rework-note {
           font-size: 12px;
           color: #9a3412;
-          line-height: 1.35;
+          line-height: 1.4;
           white-space: normal;
+          background: #f8ede7;
+          border: 1px solid #efd2c4;
+          border-radius: 6px;
+          padding: 6px 8px;
         }
         .vq-skip-note {
           font-size: 12px;
@@ -1361,9 +1991,23 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         .vq-ack-items td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .vq-ack-items th.num { text-align: right; }
         .vq-update .btn { white-space: nowrap; flex-shrink: 0; }
+        .vq-modal .vq-update-block { background: #fff; }
+        .vq-modal .vq-update-row {
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+        .vq-modal .vq-update input {
+          width: 160px;
+          flex: 1 1 140px;
+        }
+        .vq-modal .vq-update .btn {
+          width: auto;
+          flex: 0 0 auto;
+          min-width: 140px;
+        }
         .vq-muted { font-size: 12px; color: var(--text-3); line-height: 1.35; }
         .vq-err { font-size: 12px; color: var(--red, #b42318); line-height: 1.35; }
-        .vq-lots { display: flex; flex-direction: column; gap: 2px; font-size: 12px; white-space: normal; min-width: 120px; }
         .vq-card-head {
           width: 100%;
           text-align: left;
@@ -1504,16 +2148,16 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           flex-direction: column;
         }
         .vq-modal.vq-modal--wide {
-          width: min(960px, calc(100vw - 32px));
-          max-width: calc(100vw - 32px);
+          width: min(960px, 100%);
+          max-width: 100%;
         }
         .vq-modal.vq-modal--qc-all {
-          width: min(1100px, calc(100vw - 32px));
-          max-width: calc(100vw - 32px);
+          width: min(1100px, 100%);
+          max-width: 100%;
         }
         .vq-modal.vq-modal--qc {
-          width: min(520px, calc(100vw - 32px));
-          max-width: calc(100vw - 32px);
+          width: min(520px, 100%);
+          max-width: 100%;
         }
         .vq-item-desc {
           margin: 0 0 12px;
@@ -1564,11 +2208,11 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         }
         .vq-modal-meta span { display: block; font-size: 11px; color: var(--text-3); margin-bottom: 2px; }
         .vq-modal-meta strong { font-weight: 600; word-break: break-word; }
-        .vq-modal .vq-update input { width: 150px; min-width: 120px; }
         @media (max-width: 520px) {
           .vq-modal-meta { grid-template-columns: 1fr; }
           .vq-modal .vq-update-row { flex-direction: column; align-items: stretch; }
-          .vq-modal .vq-update input, .vq-modal .vq-update .btn { width: 100%; }
+          .vq-modal .vq-update input,
+          .vq-modal .vq-update .btn { width: 100%; min-width: 0; }
         }
       `}</style>
       <div className={embedded ? "vq-embed-wrap" : undefined}>
@@ -1702,6 +2346,19 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                           Receive
                         </button>
                       )}
+                      {isVendor && acknowledged && orderVendorUpdateCount(order) > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-in btn-sm"
+                          title="Update ready lots / rework for every item on this challan"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openVendorUpdateAll(order);
+                          }}
+                        >
+                          Update all ({orderVendorUpdateCount(order)})
+                        </button>
+                      )}
                       {canInspect && orderPendingQcCount(order) > 0 && (
                         <button
                           type="button"
@@ -1749,7 +2406,6 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                       <col className="vq-col-uom" />
                       <col className="vq-col-process" />
                       <col className="vq-col-project" />
-                      <col className="vq-col-remark" />
                       <col className="vq-col-ready" />
                       <col className="vq-col-dispatch" />
                       <col className="vq-col-act" />
@@ -1757,14 +2413,13 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                     <thead>
                       <tr>
                         <th>Sr</th>
-                        <th>Item Description</th>
+                        <th>Item</th>
                         <th className="num">Qty</th>
                         <th>UOM</th>
-                        <th>Process / RAL / Finish</th>
+                        <th>Process / RAL</th>
                         <th>Project</th>
-                        <th>Remark</th>
-                        <th>Ready qty</th>
-                        <th className="num vq-th-dispatch">Ready to dispatch</th>
+                        <th>Ready</th>
+                        <th className="num vq-th-dispatch">Dispatch</th>
                         <th className="vq-th-act">Update</th>
                       </tr>
                     </thead>
@@ -1776,12 +2431,11 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                         return (
                           <tr key={row.key}>
                             <td>{itemIndex + 1}</td>
-                            <td className="vq-desc">{row.item.description}</td>
+                            <td className="vq-desc" title={row.item.description}>{row.item.description}</td>
                             <td className="num">{formatQty(row.item.qty)}</td>
-                            <td>{row.item.unit || "NOS"}</td>
-                            <td>{row.item.process || "—"}</td>
-                            <td>{row.item.projectName || "—"}</td>
-                            <td>{row.item.remark || "—"}</td>
+                            <td className="vq-clip">{row.item.unit || "NOS"}</td>
+                            <td className="vq-clip" title={row.item.process || ""}>{row.item.process || "—"}</td>
+                            <td className="vq-clip" title={row.item.projectName || ""}>{row.item.projectName || "—"}</td>
                             <td>
                               <div className="vq-lots">
                                 {rounds.length ? rounds.map((round, lotIndex) => (
@@ -1914,7 +2568,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       </div>
       </div>
 
-      {isAdmin && editRow && createPortal((() => {
+      {editRow && createPortal((() => {
         const liveOrder = orders.find((o) => String(o._id) === String(editRow.orderId));
         const liveItem = liveOrder?.items?.[editRow.itemIndex];
         if (!liveOrder || !liveItem) {
@@ -1997,9 +2651,187 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           );
         }
 
+        if (qcDialog.type === "vendor_update_all") {
+          const allItems = (liveOrder.items || []).map((item, itemIndex) => ({
+            item,
+            itemIndex,
+            ...vendorItemLimits(item),
+          }));
+          const actionableCount = allItems.filter(
+            ({ remaining, rework }) => remaining > 0.001 || rework > 0.001,
+          ).length;
+          const filledCount = allItems.filter(({ itemIndex, remaining, rework }) => {
+            if (!(remaining > 0.001 || rework > 0.001)) return false;
+            const d = bulkDrafts[itemIndex] || {};
+            const qty = d.qty === "" || d.qty == null ? 0 : Number(d.qty);
+            const rw = d.rework === "" || d.rework == null ? 0 : Number(d.rework);
+            return (Number.isFinite(qty) && qty > 0) || (Number.isFinite(rw) && rw > 0);
+          }).length;
+          return (
+            <div className="vq-modal-overlay" onClick={() => !qcDialogBusy && setQcDialog(null)}>
+              <div
+                className="vq-modal vq-modal--qc-all"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Update all items"
+              >
+                <div className="vq-modal-head">
+                  <div>
+                    <h3>Update all items</h3>
+                    <div className="vq-muted" style={{ marginTop: 4 }}>
+                      Challan {liveOrder.srNo}
+                      {liveOrder.vendorName ? ` · ${liveOrder.vendorName}` : ""}
+                      {" · "}
+                      {allItems.length} item{allItems.length === 1 ? "" : "s"}
+                      {" · "}
+                      {actionableCount} can be updated
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={qcDialogBusy}
+                    onClick={() => setQcDialog(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="vq-modal-body">
+                  <p className="vq-hint">
+                    Enter a ready lot and/or rework qty for each item, then submit together. Leave a field blank to skip that action.
+                  </p>
+                  <div className="vq-vbulk-wrap">
+                    <table className="vq-vbulk-table">
+                      <colgroup>
+                        <col className="vq-vb-sr" />
+                        <col className="vq-vb-item" />
+                        <col className="vq-vb-qty" />
+                        <col className="vq-vb-sub" />
+                        <col className="vq-vb-left" />
+                        <col className="vq-vb-disp" />
+                        <col className="vq-vb-lot" />
+                        <col className="vq-vb-rework" />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Item</th>
+                          <th className="num">Qty</th>
+                          <th className="num">Submitted</th>
+                          <th className="num">Left</th>
+                          <th className="num">Dispatch</th>
+                          <th>Ready lot</th>
+                          <th>Rework</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allItems.map(({ item, itemIndex, orderQty, sent, remaining, rework }) => {
+                          const totals = inspectedTotals(item);
+                          const d = bulkDrafts[itemIndex] || {};
+                          const canLot = remaining > 0.001;
+                          const canRework = rework > 0.001;
+                          const waiting = canLot || canRework;
+                          const notes = reworkRemarks(item);
+                          const noteText = notes.map((n) => `Rework ${formatQty(n.qty)}: ${n.remark}`).join(" · ");
+                          return (
+                            <tr key={itemIndex} className={waiting ? undefined : "is-done"}>
+                              <td className="num">{itemIndex + 1}</td>
+                              <td className="vq-vbulk-itemcell">
+                                <strong title={item.description || ""}>{item.description || "—"}</strong>
+                                <div className="vq-item-sub" title={[item.process, item.projectName].filter(Boolean).join(" · ")}>
+                                  {[item.process, item.projectName].filter(Boolean).join(" · ") || "—"}
+                                </div>
+                                {noteText ? (
+                                  <div className="vq-rework-line" title={noteText}>{noteText}</div>
+                                ) : null}
+                              </td>
+                              <td className="num">{formatQty(orderQty)} {item.unit || "NOS"}</td>
+                              <td className="num">{sent ? formatQty(sent) : "—"}</td>
+                              <td className="num">{canLot ? formatQty(remaining) : "—"}</td>
+                              <td className="num">{totals.dispatch ? formatQty(totals.dispatch) : "—"}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0.001"
+                                  max={canLot ? remaining : undefined}
+                                  step="any"
+                                  disabled={!canLot}
+                                  value={canLot ? (d.qty ?? "") : ""}
+                                  placeholder={canLot ? `Max ${formatQty(remaining)}` : "—"}
+                                  title={canLot ? `Max ${formatQty(remaining)}` : "No quantity left"}
+                                  onChange={(e) => setBulkDrafts((prev) => ({
+                                    ...prev,
+                                    [itemIndex]: { ...prev[itemIndex], qty: e.target.value },
+                                  }))}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0.001"
+                                  max={canRework ? rework : undefined}
+                                  step="any"
+                                  disabled={!canRework}
+                                  value={canRework ? (d.rework ?? "") : ""}
+                                  placeholder={canRework ? `Max ${formatQty(rework)}` : "—"}
+                                  title={canRework ? `Max ${formatQty(rework)}` : "No rework"}
+                                  onChange={(e) => setBulkDrafts((prev) => ({
+                                    ...prev,
+                                    [itemIndex]: { ...prev[itemIndex], rework: e.target.value },
+                                  }))}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {qcDialogErr && <div className="vq-err" style={{ marginTop: 10 }}>{qcDialogErr}</div>}
+                  <div className="vq-modal-foot">
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={qcDialogBusy}
+                      onClick={() => setQcDialog(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-in"
+                      disabled={qcDialogBusy || filledCount === 0}
+                      onClick={() => saveVendorUpdateAllFromDialog(liveOrder)}
+                    >
+                      {qcDialogBusy ? "Saving…" : `Submit updates (${filledCount})`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
         if (qcDialog.type === "check_all") {
           const allItems = (liveOrder.items || []).map((item, itemIndex) => ({ item, itemIndex }));
           const pendingCount = allItems.filter(({ item }) => pendingRounds(item).length > 0).length;
+          const draftAccept = (d, sliceQty) => {
+            if (d.accept !== undefined && d.accept !== null) return d.accept;
+            // migrate older draft shape / missing key → default to With QC
+            if (d.dispatch !== undefined && d.dispatch !== null) return d.dispatch;
+            return String(sliceQty);
+          };
+          const filledCount = allItems.filter(({ item, itemIndex }) => {
+            if (!pendingRounds(item).length) return false;
+            const d = bulkDrafts[itemIndex] || {};
+            if (d.skip) return !!String(d.remark || "").trim();
+            const sliceQty = pendingReadyQty(item);
+            const accept = Number(draftAccept(d, sliceQty)) || 0;
+            const rework = d.rework === "" || d.rework == null ? 0 : Number(d.rework);
+            const reject = d.reject === "" || d.reject == null ? 0 : Number(d.reject);
+            return (accept > 0) || (rework > 0) || (reject > 0);
+          }).length;
           return (
             <div className="vq-modal-overlay" onClick={() => !qcDialogBusy && setQcDialog(null)}>
               <div className="vq-modal vq-modal--qc-all" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="QC Check all items">
@@ -2010,131 +2842,161 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                       Challan {liveOrder.srNo}
                       {liveOrder.vendorName ? ` · ${liveOrder.vendorName}` : ""}
                       {" · "}
-                      {allItems.length} item{allItems.length === 1 ? "" : "s"}
+                      {formatDate(liveOrder.date)}
+                      {liveOrder.vehicleNo ? ` · ${liveOrder.vehicleNo}` : ""}
                       {" · "}
-                      {pendingCount} waiting for QC
+                      {pendingCount} waiting
                     </div>
                   </div>
                   <button type="button" className="btn btn-ghost btn-sm" disabled={qcDialogBusy} onClick={() => setQcDialog(null)}>✕</button>
                 </div>
                 <div className="vq-modal-body">
-                  <div className="vq-modal-meta" style={{ marginBottom: 14 }}>
-                    <div><span>Date</span><strong>{formatDate(liveOrder.date)}</strong></div>
-                    <div><span>Vehicle</span><strong>{liveOrder.vehicleNo || "—"}</strong></div>
-                    <div><span>Send from</span><strong>{liveOrder.sendFromName || "—"}</strong></div>
-                    <div><span>Type</span><strong>{jobTypeLabel(orderJobType(liveOrder))}</strong></div>
-                  </div>
-                  <div className="vq-bulk-list">
-                    {allItems.map(({ item, itemIndex }) => {
-                      const sliceQty = pendingReadyQty(item);
-                      const waiting = pendingRounds(item).length > 0;
-                      const totals = inspectedTotals(item);
-                      const rounds = item.qcRounds || [];
-                      const d = bulkDrafts[itemIndex] || {};
-                      return (
-                        <div
-                          key={itemIndex}
-                          className={`vq-bulk-item${waiting ? " is-pending" : " is-done"}`}
-                        >
-                          <div className="vq-bulk-row">
-                            <div className="vq-bulk-desc" title={item.description || ""}>
-                              <span className="vq-sr">Item {itemIndex + 1}</span>
-                              <strong>{item.description || "—"}</strong>
-                              <div className="vq-item-sub">
-                                {[item.process, item.projectName].filter(Boolean).join(" · ") || "—"}
-                              </div>
-                            </div>
-                            <div className="vq-bulk-chip">
-                              <span>Qty</span>
-                              <strong>{formatQty(item.qty)} {item.unit || "NOS"}</strong>
-                            </div>
-                            <div className="vq-bulk-chip">
-                              <span>Ready</span>
-                              <strong>{totals.dispatch ? formatQty(totals.dispatch) : "—"}</strong>
-                            </div>
-                            <div className="vq-bulk-chip">
-                              <span>With QC</span>
-                              <strong>{waiting ? formatQty(sliceQty) : "—"}</strong>
-                            </div>
-                            <span className={`vq-bulk-badge${waiting ? " wait" : " done"}`}>
-                              {waiting ? "Waiting" : "Done"}
-                            </span>
-                            {waiting ? (
-                              <div className="vq-bulk-fields">
-                                <label>
-                                  Dispatch
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={sliceQty}
-                                    step="any"
-                                    value={d.dispatch ?? ""}
-                                    placeholder={`Max ${formatQty(sliceQty)}`}
-                                    onChange={(e) => setBulkDrafts((prev) => ({
-                                      ...prev,
-                                      [itemIndex]: { ...prev[itemIndex], dispatch: e.target.value },
-                                    }))}
-                                  />
-                                </label>
-                                <label>
-                                  Rework
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={sliceQty}
-                                    step="any"
-                                    value={d.rejected ?? ""}
-                                    placeholder={`Max ${formatQty(sliceQty)}`}
-                                    onChange={(e) => setBulkDrafts((prev) => ({
-                                      ...prev,
-                                      [itemIndex]: { ...prev[itemIndex], rejected: e.target.value },
-                                    }))}
-                                  />
-                                </label>
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="vq-bulk-lots" title={
-                            rounds.length
-                              ? rounds.map((round, lotIndex) => (
-                                  `Lot ${lotIndex + 1}: ${formatQty(round.readyQty)} (${
-                                    round.status === "pending"
-                                      ? "With QC"
-                                      : round.skipped
-                                      ? "QC skipped"
-                                      : "Inspected"
-                                  })`
-                                )).join(" · ")
-                              : ""
-                          }>
-                            {rounds.length
-                              ? rounds.map((round, lotIndex) => (
-                                  `Lot ${lotIndex + 1}: ${formatQty(round.readyQty)} (${
-                                    round.status === "pending"
-                                      ? "With QC"
-                                      : round.skipped
-                                      ? "Skipped"
-                                      : "Inspected"
-                                  })`
-                                )).join(" · ")
-                              : (item.remark ? `Remark: ${item.remark}` : "")}
-                          </div>
-                          {waiting && Number(d.rejected) > 0 && (
-                            <textarea
-                              className="vq-remark"
-                              rows={2}
-                              style={{ marginTop: 6 }}
-                              value={d.remark ?? ""}
-                              placeholder="Remark for rework (required)"
-                              onChange={(e) => setBulkDrafts((prev) => ({
-                                ...prev,
-                                [itemIndex]: { ...prev[itemIndex], remark: e.target.value },
-                              }))}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
+                  <p className="vq-hint">
+                    QC Check all only covers quantity the vendor already sent for inspection (<strong>With QC</strong>), not the full order qty.
+                    Accept + Rework + Reject cannot exceed With QC. Left stays with the vendor until they submit another lot. Skip needs a remark; so do Rework / Reject.
+                  </p>
+                  <div className="vq-vbulk-wrap">
+                    <table className="vq-vbulk-table vq-qbulk-table">
+                      <colgroup>
+                        <col className="vq-qb-sr" />
+                        <col className="vq-qb-item" />
+                        <col className="vq-qb-qty" />
+                        <col className="vq-qb-sub" />
+                        <col className="vq-qb-qc" />
+                        <col className="vq-qb-left" />
+                        <col className="vq-qb-accept" />
+                        <col className="vq-qb-rework" />
+                        <col className="vq-qb-reject" />
+                        <col className="vq-qb-skip" />
+                        <col className="vq-qb-remark" />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Item</th>
+                          <th className="num">Order</th>
+                          <th className="num">Submitted</th>
+                          <th className="num">With QC</th>
+                          <th className="num">Left</th>
+                          <th>Accept</th>
+                          <th>Rework</th>
+                          <th>Reject</th>
+                          <th className="vq-qb-skip">Skip</th>
+                          <th>Remark</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allItems.map(({ item, itemIndex }) => {
+                          const sliceQty = pendingReadyQty(item);
+                          const orderQty = Number(item.qty) || 0;
+                          const sent = submittedReadyQty(item);
+                          const left = Math.max(0, Math.round((orderQty - sent) * 1000) / 1000);
+                          const waiting = pendingRounds(item).length > 0;
+                          const d = bulkDrafts[itemIndex] || {};
+                          const skip = !!d.skip;
+                          const acceptValue = waiting && !skip ? draftAccept(d, sliceQty) : "";
+                          return (
+                            <tr key={itemIndex} className={waiting ? undefined : "is-done"}>
+                              <td className="num">{itemIndex + 1}</td>
+                              <td className="vq-vbulk-itemcell">
+                                <strong title={item.description || ""}>{item.description || "—"}</strong>
+                                <div className="vq-item-sub" title={[item.process, item.projectName].filter(Boolean).join(" · ")}>
+                                  {[item.process, item.projectName].filter(Boolean).join(" · ") || "—"}
+                                </div>
+                              </td>
+                              <td className="num">{formatQty(orderQty)} {item.unit || "NOS"}</td>
+                              <td className="num">{sent ? formatQty(sent) : "—"}</td>
+                              <td className="num">{waiting ? formatQty(sliceQty) : "—"}</td>
+                              <td className="num">{left > 0.001 ? formatQty(left) : "—"}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={sliceQty}
+                                  step="any"
+                                  disabled={!waiting || skip}
+                                  className={!waiting || skip ? "is-disabled" : undefined}
+                                  value={acceptValue}
+                                  placeholder={waiting ? `Max ${formatQty(sliceQty)}` : "—"}
+                                  onChange={(e) => setBulkDrafts((prev) => ({
+                                    ...prev,
+                                    [itemIndex]: { ...prev[itemIndex], accept: e.target.value, skip: false },
+                                  }))}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={sliceQty}
+                                  step="any"
+                                  disabled={!waiting || skip}
+                                  className={!waiting || skip ? "is-disabled" : undefined}
+                                  value={waiting && !skip ? (d.rework ?? "") : ""}
+                                  placeholder={waiting ? "—" : "—"}
+                                  onChange={(e) => setBulkDrafts((prev) => ({
+                                    ...prev,
+                                    [itemIndex]: { ...prev[itemIndex], rework: e.target.value, skip: false },
+                                  }))}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={sliceQty}
+                                  step="any"
+                                  disabled={!waiting || skip}
+                                  className={!waiting || skip ? "is-disabled" : undefined}
+                                  value={waiting && !skip ? (d.reject ?? "") : ""}
+                                  placeholder={waiting ? "—" : "—"}
+                                  onChange={(e) => setBulkDrafts((prev) => ({
+                                    ...prev,
+                                    [itemIndex]: { ...prev[itemIndex], reject: e.target.value, skip: false },
+                                  }))}
+                                />
+                              </td>
+                              <td className="vq-qb-skip">
+                                <input
+                                  type="checkbox"
+                                  disabled={!waiting}
+                                  checked={waiting ? skip : false}
+                                  title="Skip QC for this item’s pending qty"
+                                  onChange={(e) => setBulkDrafts((prev) => ({
+                                    ...prev,
+                                    [itemIndex]: {
+                                      ...prev[itemIndex],
+                                      skip: e.target.checked,
+                                      accept: e.target.checked ? "" : String(sliceQty),
+                                      rework: "",
+                                      reject: "",
+                                    },
+                                  }))}
+                                />
+                              </td>
+                              <td>
+                                <textarea
+                                  disabled={!waiting}
+                                  className={!waiting ? "is-disabled" : undefined}
+                                  value={waiting ? (d.remark ?? "") : ""}
+                                  placeholder={
+                                    !waiting
+                                      ? "—"
+                                      : skip
+                                      ? "Skip reason (required)"
+                                      : "Required for rework / reject"
+                                  }
+                                  onChange={(e) => setBulkDrafts((prev) => ({
+                                    ...prev,
+                                    [itemIndex]: { ...prev[itemIndex], remark: e.target.value },
+                                  }))}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                   {qcDialogErr && <div className="vq-err" style={{ marginTop: 10 }}>{qcDialogErr}</div>}
                   <div className="vq-modal-foot">
@@ -2142,10 +3004,10 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                     <button
                       type="button"
                       className="btn btn-in"
-                      disabled={qcDialogBusy || pendingCount === 0}
+                      disabled={qcDialogBusy || filledCount === 0}
                       onClick={() => saveQcCheckAllFromDialog(liveOrder)}
                     >
-                      {qcDialogBusy ? "Saving…" : `Save QC (${pendingCount})`}
+                      {qcDialogBusy ? "Saving…" : `Save QC (${filledCount})`}
                     </button>
                   </div>
                 </div>
@@ -2182,6 +3044,224 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         const orderQty = Number(liveItem.qty) || 0;
         const remaining = Math.round((orderQty - submittedReadyQty(liveItem)) * 1000) / 1000;
         const busy = busyKey === liveRow.key;
+
+        if (qcDialog.type === "accept") {
+          return (
+            <div className="vq-modal-overlay" onClick={() => setQcDialog(null)}>
+              <div className="vq-modal vq-modal--qc" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Accept QC">
+                <div className="vq-modal-head">
+                  <div>
+                    <h3>Accept</h3>
+                    <div className="vq-muted" style={{ marginTop: 4 }}>
+                      Challan {liveOrder.srNo}
+                      {liveOrder.vendorName ? ` · ${liveOrder.vendorName}` : ""}
+                    </div>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setQcDialog(null)}>✕</button>
+                </div>
+                <div className="vq-modal-body">
+                  <div className="vq-item-desc">
+                    <span>Item description</span>
+                    <strong>{liveItem.description || "—"}</strong>
+                    <div className="vq-item-sub">
+                      {formatQty(orderQty)} {liveItem.unit || "NOS"}
+                      {liveItem.process ? ` · ${liveItem.process}` : ""}
+                      {liveItem.projectName ? ` · ${liveItem.projectName}` : ""}
+                    </div>
+                  </div>
+                  <p className="vq-muted" style={{ marginBottom: 12 }}>
+                    Accepted quantity becomes ready to dispatch. With QC now: {formatQty(sliceQty)} {liveItem.unit || "NOS"}.
+                  </p>
+                  <div className="field" style={{ marginBottom: 12 }}>
+                    <label>
+                      Accept qty <span style={{ color: "var(--red)" }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0.001"
+                      max={sliceQty}
+                      step="any"
+                      value={draft.acceptQty ?? ""}
+                      placeholder={`Max ${formatQty(sliceQty)}`}
+                      onChange={(e) => {
+                        setDraft(liveRow.key, { acceptQty: e.target.value });
+                        setQcDialogErr("");
+                      }}
+                    />
+                  </div>
+                  {qcDialogErr && <div className="vq-err" style={{ marginBottom: 10 }}>{qcDialogErr}</div>}
+                  <div className="vq-modal-foot">
+                    <button type="button" className="btn btn-ghost" onClick={() => setQcDialog(null)}>Cancel</button>
+                    <button
+                      type="button"
+                      className="btn btn-in"
+                      disabled={busy}
+                      onClick={() => saveQcAcceptFromDialog(liveRow)}
+                    >
+                      {busy ? "Saving…" : "Confirm accept"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        if (qcDialog.type === "rework") {
+          return (
+            <div className="vq-modal-overlay" onClick={() => setQcDialog(null)}>
+              <div className="vq-modal vq-modal--qc" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Rework QC">
+                <div className="vq-modal-head">
+                  <div>
+                    <h3>Rework</h3>
+                    <div className="vq-muted" style={{ marginTop: 4 }}>
+                      Challan {liveOrder.srNo}
+                      {liveOrder.vendorName ? ` · ${liveOrder.vendorName}` : ""}
+                    </div>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setQcDialog(null)}>✕</button>
+                </div>
+                <div className="vq-modal-body">
+                  <div className="vq-item-desc">
+                    <span>Item description</span>
+                    <strong>{liveItem.description || "—"}</strong>
+                    <div className="vq-item-sub">
+                      {formatQty(orderQty)} {liveItem.unit || "NOS"}
+                      {liveItem.process ? ` · ${liveItem.process}` : ""}
+                      {liveItem.projectName ? ` · ${liveItem.projectName}` : ""}
+                    </div>
+                  </div>
+                  <p className="vq-muted" style={{ marginBottom: 12 }}>
+                    This quantity goes back to the vendor for rework. With QC now: {formatQty(sliceQty)} {liveItem.unit || "NOS"}.
+                  </p>
+                  <div className="field" style={{ marginBottom: 12 }}>
+                    <label>
+                      Rework qty <span style={{ color: "var(--red)" }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0.001"
+                      max={sliceQty}
+                      step="any"
+                      value={draft.reworkQty ?? ""}
+                      placeholder={`Max ${formatQty(sliceQty)}`}
+                      onChange={(e) => {
+                        setDraft(liveRow.key, { reworkQty: e.target.value });
+                        setQcDialogErr("");
+                      }}
+                    />
+                  </div>
+                  <div className="field" style={{ marginBottom: 12 }}>
+                    <label>
+                      Reason for rework <span style={{ color: "var(--red)" }}>*</span>
+                    </label>
+                    <textarea
+                      className="vq-remark"
+                      rows={3}
+                      value={draft.remark ?? ""}
+                      placeholder="What should the vendor fix?"
+                      onChange={(e) => {
+                        setDraft(liveRow.key, { remark: e.target.value });
+                        setQcDialogErr("");
+                      }}
+                      required
+                    />
+                  </div>
+                  {qcDialogErr && <div className="vq-err" style={{ marginBottom: 10 }}>{qcDialogErr}</div>}
+                  <div className="vq-modal-foot">
+                    <button type="button" className="btn btn-ghost" onClick={() => setQcDialog(null)}>Cancel</button>
+                    <button
+                      type="button"
+                      className="btn btn-in"
+                      disabled={busy}
+                      onClick={() => saveQcReworkFromDialog(liveRow)}
+                    >
+                      {busy ? "Saving…" : "Confirm rework"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        if (qcDialog.type === "reject") {
+          return (
+            <div className="vq-modal-overlay" onClick={() => setQcDialog(null)}>
+              <div className="vq-modal vq-modal--qc" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Reject QC">
+                <div className="vq-modal-head">
+                  <div>
+                    <h3>Reject</h3>
+                    <div className="vq-muted" style={{ marginTop: 4 }}>
+                      Challan {liveOrder.srNo}
+                      {liveOrder.vendorName ? ` · ${liveOrder.vendorName}` : ""}
+                    </div>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setQcDialog(null)}>✕</button>
+                </div>
+                <div className="vq-modal-body">
+                  <div className="vq-item-desc">
+                    <span>Item description</span>
+                    <strong>{liveItem.description || "—"}</strong>
+                    <div className="vq-item-sub">
+                      {formatQty(orderQty)} {liveItem.unit || "NOS"}
+                      {liveItem.process ? ` · ${liveItem.process}` : ""}
+                      {liveItem.projectName ? ` · ${liveItem.projectName}` : ""}
+                    </div>
+                  </div>
+                  <p className="vq-muted" style={{ marginBottom: 12 }}>
+                    Permanently reject as scrap (not sent for rework). With QC now: {formatQty(sliceQty)} {liveItem.unit || "NOS"}.
+                  </p>
+                  <div className="field" style={{ marginBottom: 12 }}>
+                    <label>
+                      Reject qty <span style={{ color: "var(--red)" }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0.001"
+                      max={sliceQty}
+                      step="any"
+                      value={draft.rejectQty ?? ""}
+                      placeholder={`Max ${formatQty(sliceQty)}`}
+                      onChange={(e) => {
+                        setDraft(liveRow.key, { rejectQty: e.target.value });
+                        setQcDialogErr("");
+                      }}
+                    />
+                  </div>
+                  <div className="field" style={{ marginBottom: 12 }}>
+                    <label>
+                      Reason for reject <span style={{ color: "var(--red)" }}>*</span>
+                    </label>
+                    <textarea
+                      className="vq-remark"
+                      rows={3}
+                      value={draft.remark ?? ""}
+                      placeholder="Why is this quantity rejected as scrap?"
+                      onChange={(e) => {
+                        setDraft(liveRow.key, { remark: e.target.value });
+                        setQcDialogErr("");
+                      }}
+                      required
+                    />
+                  </div>
+                  {qcDialogErr && <div className="vq-err" style={{ marginBottom: 10 }}>{qcDialogErr}</div>}
+                  <div className="vq-modal-foot">
+                    <button type="button" className="btn btn-ghost" onClick={() => setQcDialog(null)}>Cancel</button>
+                    <button
+                      type="button"
+                      className="btn btn-out"
+                      disabled={busy}
+                      onClick={() => saveQcRejectFromDialog(liveRow)}
+                    >
+                      {busy ? "Saving…" : "Confirm reject"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
 
         if (qcDialog.type === "skip") {
           const qtyNote = pendingRounds(liveItem).length

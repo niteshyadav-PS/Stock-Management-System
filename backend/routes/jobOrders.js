@@ -737,9 +737,8 @@ router.patch("/:id/vendor-ack", authMiddleware, async (req, res) => {
 
 // ── PATCH /api/job-orders/:id/qc-stage ────────────────────────────────────────
 // request_qc  vendor sends a ready % for inspection. Locked until QC finishes.
-// inspect     QC records how much of that ready qty is ready to dispatch
-//             and how much is rejected. Those two quantities must add up
-//             to the quantity the vendor just marked ready.
+// inspect     QC records dispatch / rework / scrap from a pending ready lot.
+//             dispatchQty + rejectedQty + scrapQty must cover the inspected qty.
 // skip_qc     QC/admin skips quality check; qty goes to ready-to-dispatch.
 //             Requires skipRemark. Works on pending lots, or remaining unsent qty.
 router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
@@ -796,6 +795,7 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
         status: "pending",
         dispatchQty: 0,
         rejectedQty: 0,
+        scrapQty: 0,
         submittedBy: who,
         submittedAt: now,
       });
@@ -820,13 +820,14 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
         origin: "rework",
         dispatchQty: 0,
         rejectedQty: 0,
+        scrapQty: 0,
         submittedBy: who,
         submittedAt: now,
       });
       note = `${item.description}: ${lotQty} rework sent for QC`;
     } else if (action === "inspect") {
       if (role !== "quality" && role !== "admin")
-        return res.status(403).json({ error: "Only QC or an admin can record ready to dispatch and rejected quantities." });
+        return res.status(403).json({ error: "Only QC or an admin can record ready to dispatch, rework, and reject quantities." });
 
       const waiting = (item.qcRounds || []).filter((round) => round.status === "pending");
       const merged = roundQty(waiting.reduce((sum, round) => sum + (Number(round.readyQty) || 0), 0));
@@ -835,48 +836,72 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
 
       const dispatchQty = roundQty(req.body?.dispatchQty);
       const rejectedQty = roundQty(req.body?.rejectedQty);
+      const scrapQty = roundQty(req.body?.scrapQty);
       const reworkRemark = String(req.body?.reworkRemark || "").trim();
-      if (!Number.isFinite(dispatchQty) || dispatchQty < 0 || !Number.isFinite(rejectedQty) || rejectedQty < 0)
-        return res.status(400).json({ error: "Enter ready to dispatch and rejected quantities." });
+      const scrapRemark = String(req.body?.scrapRemark || "").trim();
+      if (
+        !Number.isFinite(dispatchQty) || dispatchQty < 0
+        || !Number.isFinite(rejectedQty) || rejectedQty < 0
+        || !Number.isFinite(scrapQty) || scrapQty < 0
+      ) {
+        return res.status(400).json({ error: "Enter accept, rework, and reject quantities." });
+      }
       const orderQty = roundQty(item.qty);
-      const inspectedQty = roundQty(dispatchQty + rejectedQty);
+      const inspectedQty = roundQty(dispatchQty + rejectedQty + scrapQty);
       if (inspectedQty <= 0)
         return res.status(400).json({ error: "Enter the quantity you inspected." });
       if (rejectedQty > 0.001 && !reworkRemark)
         return res.status(400).json({ error: "Enter a remark for the rework quantity." });
-      if (dispatchQty - merged > 0.001 || rejectedQty - merged > 0.001 || inspectedQty - merged > 0.001)
+      if (scrapQty > 0.001 && !scrapRemark)
+        return res.status(400).json({ error: "Enter a remark for the rejected quantity." });
+      if (
+        dispatchQty - merged > 0.001
+        || rejectedQty - merged > 0.001
+        || scrapQty - merged > 0.001
+        || inspectedQty - merged > 0.001
+      ) {
         return res.status(400).json({
           error: `Cannot update more than the quantity (${merged}).`,
         });
+      }
       const alreadyDispatch = readyToDispatchQty(item);
       const dispatchRoom = roundQty(Math.max(0, orderQty - alreadyDispatch));
       if (dispatchQty - dispatchRoom > 0.001)
         return res.status(400).json({
           error: `Cannot update more than the quantity (${dispatchRoom}). Ready to dispatch is already ${alreadyDispatch}.`,
         });
-      if (rejectedQty - orderQty > 0.001 || inspectedQty - orderQty > 0.001)
+      if (rejectedQty - orderQty > 0.001 || scrapQty - orderQty > 0.001 || inspectedQty - orderQty > 0.001)
         return res.status(400).json({
           error: `Cannot update more than the quantity (${orderQty}).`,
         });
 
       let dispatchLeft = dispatchQty;
       let rejectedLeft = rejectedQty;
+      let scrapLeft = scrapQty;
       let remarkLeft = reworkRemark;
+      let scrapRemarkLeft = scrapRemark;
       const nextRounds = [];
       for (const round of item.qcRounds || []) {
-        const pendingLeft = roundQty(dispatchLeft + rejectedLeft);
+        const pendingLeft = roundQty(dispatchLeft + rejectedLeft + scrapLeft);
         if (round.status !== "pending" || pendingLeft <= 0.001) {
           nextRounds.push(round.toObject());
           continue;
         }
         const ready = roundQty(round.readyQty);
         const take = Math.min(ready, pendingLeft);
-        const takeRejected = Math.min(rejectedLeft, take);
-        const takeDispatch = roundQty(take - takeRejected);
-        rejectedLeft = roundQty(rejectedLeft - takeRejected);
+        let left = take;
+        const takeDispatch = Math.min(dispatchLeft, left);
+        left = roundQty(left - takeDispatch);
+        const takeRejected = Math.min(rejectedLeft, left);
+        left = roundQty(left - takeRejected);
+        const takeScrap = Math.min(scrapLeft, left);
         dispatchLeft = roundQty(dispatchLeft - takeDispatch);
+        rejectedLeft = roundQty(rejectedLeft - takeRejected);
+        scrapLeft = roundQty(scrapLeft - takeScrap);
         const takeRemark = takeRejected > 0.001 ? remarkLeft : "";
         if (takeRejected > 0.001) remarkLeft = "";
+        const takeScrapRemark = takeScrap > 0.001 ? scrapRemarkLeft : "";
+        if (takeScrap > 0.001) scrapRemarkLeft = "";
         nextRounds.push({
           readyPercent: round.readyPercent,
           readyQty: take,
@@ -884,7 +909,11 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
           origin: round.origin === "rework" ? "rework" : "order",
           dispatchQty: takeDispatch,
           rejectedQty: takeRejected,
+          scrapQty: takeScrap,
           reworkRemark: takeRemark,
+          scrapRemark: takeScrapRemark,
+          skipped: false,
+          skipRemark: "",
           submittedBy: round.submittedBy || "",
           submittedAt: round.submittedAt || null,
           inspectedBy: who,
@@ -899,7 +928,11 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
             origin: round.origin === "rework" ? "rework" : "order",
             dispatchQty: 0,
             rejectedQty: 0,
+            scrapQty: 0,
             reworkRemark: "",
+            scrapRemark: "",
+            skipped: false,
+            skipRemark: "",
             submittedBy: round.submittedBy || "",
             submittedAt: round.submittedAt || null,
             inspectedBy: "",
@@ -910,10 +943,11 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
       item.qcRounds = nextRounds;
       const stillPending = roundQty(merged - inspectedQty);
       const dispatchTotal = roundQty(alreadyDispatch + dispatchQty);
-      const reworkNote = rejectedQty > 0.001
-        ? ` ${rejectedQty} sent back to the vendor for rework${reworkRemark ? ` (${reworkRemark})` : ""}.`
-        : "";
-      note = `${item.description}: QC ${dispatchQty} ready to dispatch (total ${dispatchTotal}), ${rejectedQty} rework.${reworkNote}${stillPending > 0.001 ? ` ${stillPending} still pending inspection.` : ""}`;
+      const parts = [];
+      if (dispatchQty > 0.001) parts.push(`${dispatchQty} accepted (dispatch total ${dispatchTotal})`);
+      if (rejectedQty > 0.001) parts.push(`${rejectedQty} rework${reworkRemark ? ` (${reworkRemark})` : ""}`);
+      if (scrapQty > 0.001) parts.push(`${scrapQty} rejected${scrapRemark ? ` (${scrapRemark})` : ""}`);
+      note = `${item.description}: QC ${parts.join(", ") || "updated"}.${stillPending > 0.001 ? ` ${stillPending} still pending inspection.` : ""}`;
     } else if (action === "skip_qc") {
       if (role !== "quality" && role !== "admin")
         return res.status(403).json({ error: "Only QC or an admin can skip quality checking." });
@@ -946,7 +980,9 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
             origin: round.origin === "rework" ? "rework" : "order",
             dispatchQty: ready,
             rejectedQty: 0,
+            scrapQty: 0,
             reworkRemark: "",
+            scrapRemark: "",
             skipped: true,
             skipRemark,
             submittedBy: round.submittedBy || "",
@@ -970,7 +1006,9 @@ router.patch("/:id/qc-stage", authMiddleware, async (req, res) => {
           origin: "order",
           dispatchQty: take,
           rejectedQty: 0,
+          scrapQty: 0,
           reworkRemark: "",
+          scrapRemark: "",
           skipped: true,
           skipRemark,
           submittedBy: who,
