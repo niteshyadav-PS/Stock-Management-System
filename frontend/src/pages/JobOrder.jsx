@@ -4956,6 +4956,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         }
         .jo-more-wrap {
           position: relative;
+          flex: 0 0 auto;
         }
         .jo-more-btn {
           width: 28px;
@@ -4964,6 +4965,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           font-size: 18px !important;
           line-height: 1;
           font-weight: 700;
+          flex: 0 0 auto !important;
         }
         .jo-more-btn.is-open {
           background: var(--paper-dim);
@@ -4973,8 +4975,8 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           position: absolute;
           top: calc(100% + 4px);
           right: 0;
-          z-index: 40;
-          min-width: 132px;
+          z-index: 80;
+          min-width: 148px;
           padding: 4px;
           border: 1px solid var(--line);
           border-radius: 8px;
@@ -5008,18 +5010,29 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         .jo-orders-table td.jo-detail-cell[colspan] {
           width: 100%;
         }
-        .jo-orders-mobile { display: none; flex-direction: column; gap: 10px; }
+        .jo-orders-mobile {
+          display: none;
+          flex-direction: column;
+          gap: 10px;
+          overflow: visible;
+        }
         .jo-order-card {
+          position: relative;
           border: 1px solid var(--line);
           border-radius: 10px;
           background: #fff;
-          overflow: hidden;
+          /* visible so ⋮ menu is not clipped under the card edge */
+          overflow: visible;
+        }
+        .jo-order-card.is-menu-open {
+          z-index: 30;
         }
         .jo-order-card-head {
           width: 100%;
           text-align: left;
           background: #fff;
           border: none;
+          border-radius: 10px 10px 0 0;
           padding: 12px 14px;
           cursor: pointer;
           font-family: inherit;
@@ -5040,12 +5053,19 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           line-height: 1.4;
         }
         .jo-order-card-actions {
+          position: relative;
           display: flex;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
+          align-items: center;
           gap: 6px;
           padding: 0 12px 12px;
+          overflow: visible;
+          z-index: 2;
         }
-        .jo-order-card-actions .btn {
+        .jo-order-card-actions .jo-order-actions {
+          width: 100%;
+        }
+        .jo-order-card-actions .jo-order-actions > .btn {
           height: 32px;
           padding: 0 10px;
           font-size: 12px;
@@ -5053,10 +5073,18 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           justify-content: center;
           box-sizing: border-box;
         }
+        /* Open menu upward on tablet/mobile cards so it isn't cut by the next card */
+        .jo-order-card-actions .jo-more-menu {
+          top: auto;
+          bottom: calc(100% + 6px);
+          right: 0;
+          z-index: 60;
+        }
         .jo-order-card-detail {
           padding: 0 12px 12px;
           border-top: 1px solid var(--line);
           background: #fff;
+          border-radius: 0 0 10px 10px;
         }
 
         /* ── Modals ─────────────────────────────────────────────────────── */
@@ -5298,7 +5326,9 @@ export default function JobOrder({ jobType = "powder_coating" }) {
             align-items: stretch;
           }
           .jo-items-toolbar button { width: 100%; justify-content: center; }
-          .jo-order-card-actions .btn { flex: 1 1 100%; }
+          .jo-order-card-actions .jo-order-actions > .btn:not(.jo-more-btn) {
+            flex: 1 1 auto;
+          }
         }
       `}</style>
 
@@ -5881,8 +5911,12 @@ export default function JobOrder({ jobType = "powder_coating" }) {
               );
               const hasPending = pendingTotal > 0.0001;
               const open = openOrderId === order._id;
+              const menuOpen = actionsMenuId === order._id;
               return (
-                <div key={order._id} className="jo-order-card">
+                <div
+                  key={order._id}
+                  className={`jo-order-card${menuOpen ? " is-menu-open" : ""}`}
+                >
                   <button
                     type="button"
                     className={`jo-order-card-head${open ? " is-open" : ""}`}
