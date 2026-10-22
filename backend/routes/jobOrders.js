@@ -222,11 +222,12 @@ router.get(
           .status(400)
           .json({ error: "Choose Send From, Send To, or Issued By." });
       }
-      const match = { [field]: { $nin: [null, ""] } };
-      const jobType = String(req.query.jobType || "").trim();
-      if (jobType === "powder_coating" || jobType === "fabrication") {
-        match.jobType = jobType;
-      }
+      // Same jobType scope as the Powder Coating / Fabrication list (includes
+      // legacy rows with missing/empty jobType on the powder_coating page).
+      const match = mergeFilters(
+        { [field]: { $nin: [null, ""] } },
+        jobTypeFilter(req.query.jobType),
+      );
       const rows = await JobOrder.aggregate([
         { $match: match },
         { $group: { _id: `$${field}`, count: { $sum: 1 } } },
@@ -279,11 +280,15 @@ router.post(
         return res.status(400).json({ error: "Select fewer names at once." });
       }
 
-      const filter = { [field]: { $in: from } };
-      const jobType = String(req.body.jobType || "").trim();
-      if (jobType === "powder_coating" || jobType === "fabrication") {
-        filter.jobType = jobType;
-      }
+      // Match list scope; also rename trimmed equals of each selected spelling.
+      const fromPattern = from.flatMap((name) => {
+        const trimmed = String(name).trim();
+        return trimmed && trimmed !== name ? [name, trimmed] : [name];
+      });
+      const filter = mergeFilters(
+        { [field]: { $in: [...new Set(fromPattern)] } },
+        jobTypeFilter(req.body.jobType),
+      );
 
       const orderResult = await JobOrder.updateMany(filter, {
         $set: { [field]: to },
@@ -293,7 +298,7 @@ router.post(
       // Keep vendor logins linked when Send To (vendor company) is renamed.
       if (field === "vendorName") {
         const userResult = await User.updateMany(
-          { role: "vendor", vendorName: { $in: from } },
+          { role: "vendor", vendorName: { $in: [...new Set(fromPattern)] } },
           { $set: { vendorName: to } },
         );
         usersUpdated = userResult.modifiedCount || 0;

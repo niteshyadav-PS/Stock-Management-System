@@ -174,8 +174,10 @@ export default function RenameFieldNames({
           <div>
             <h3 style={{ margin: 0 }}>Fix duplicate names</h3>
             <p style={hint}>
-              Tick every spelling that should be the same name, including capitals and small mistakes, then rename them together.
-              {mixedCount > 0 && ` ${mixedCount} group${mixedCount === 1 ? "" : "s"} already match except for capital letters or spaces.`}
+              Tick every spelling that should become one name (e.g. Quest Enterprises and Quest Enterprises Pvt Ltd), type the correct name, then Rename.
+              Capitals/spaces that only differ are grouped together
+              {mixedCount > 0 ? ` (${mixedCount} group${mixedCount === 1 ? "" : "s"})` : ""}.
+              Different words stay as separate rows so you can merge them yourself.
             </p>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
@@ -220,11 +222,12 @@ export default function RenameFieldNames({
                 <div style={groupHead}>
                   <span style={{ fontSize: 12, color: "var(--text-3)" }}>
                     {group.mixed
-                      ? "Same name, different spelling"
-                      : `${group.total} entr${group.total === 1 ? "y" : "ies"}`}
-                    {group.mixed ? ` · ${group.total} entries` : ""}
+                      ? `Same name, different capitals/spaces · ${group.items.length} spellings · ${group.total} challans`
+                      : group.total === 1
+                      ? "1 challan uses this exact name"
+                      : `${group.total} challans use this exact name`}
                   </span>
-                  {group.mixed && (
+                  {(group.mixed || group.items.length > 1) && (
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => toggleGroup(group)}>
                       {group.items.every((item) => selected.has(item.value))
                         ? "Clear group"
@@ -241,7 +244,9 @@ export default function RenameFieldNames({
                         onChange={() => toggle(item.value)}
                       />
                       <span style={{ flex: 1, fontWeight: 600 }}>{item.value}</span>
-                      <span style={{ color: "var(--text-3)", fontSize: 12 }}>{item.count}</span>
+                      <span style={{ color: "var(--text-3)", fontSize: 12 }}>
+                        {item.count} challan{item.count === 1 ? "" : "s"}
+                      </span>
                     </label>
                     <button
                       type="button"
