@@ -181,6 +181,12 @@ export const getPurchaseOrderActivity = (id) => client.get(`/purchase-orders/${i
 export const getJobOrders = (params) =>
   client.get(withQuery("/job-orders", params || {}));
 
+export const getJobOrderNameValues = (field, params = {}) =>
+  client.get(withQuery("/job-orders/name-values", { field, ...params }));
+
+export const renameJobOrderNames = (field, from, to, params = {}) =>
+  client.post("/job-orders/rename-names", { field, from, to, ...params });
+
 export const updateJobOrderQcStage = (id, data) =>
   client.patch(`/job-orders/${id}/qc-stage`, data);
 

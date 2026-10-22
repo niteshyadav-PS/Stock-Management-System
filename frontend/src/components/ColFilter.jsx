@@ -58,14 +58,25 @@ export default function ColFilter({
   }
 
   const unique = useMemo(() => {
-    const list = [...new Set((values || []).filter(Boolean))];
+    // Collapse case/whitespace duplicates (e.g. "AS Engineering" / "AS ENGINEERING").
+    const map = new Map();
+    for (const raw of values || []) {
+      if (raw == null || raw === "") continue;
+      const display = String(raw).trim().replace(/\s+/g, " ");
+      if (!display) continue;
+      const key = display.toLowerCase();
+      if (!map.has(key)) map.set(key, display);
+    }
+    const list = [...map.values()];
     const toNum = (v) => {
       const c = String(v).replace(/[^0-9.\-]/g, "");
       return c === "" || c === "-" ? NaN : parseFloat(c);
     };
     const isNum = list.length > 0 && list.every((v) => !isNaN(toNum(v)));
     list.sort((a, b) =>
-      isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
+      isNum
+        ? toNum(a) - toNum(b)
+        : String(a).localeCompare(String(b), undefined, { sensitivity: "base" }),
     );
     return list;
   }, [values]);

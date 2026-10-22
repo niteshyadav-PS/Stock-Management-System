@@ -26,8 +26,26 @@ function groupValues(values) {
     });
 }
 
-export default function RenameFieldNames({ onClose, onRenamed }) {
-  const [field, setField] = useState("vendor");
+const INWARD_FIELDS = [
+  { key: "vendor", label: "Vendor" },
+  { key: "category", label: "Category" },
+];
+
+/**
+ * Fix duplicate names UI.
+ * Defaults match Inward. Pass fields + loadValues + renameValues for Job Orders etc.
+ */
+export default function RenameFieldNames({
+  onClose,
+  onRenamed,
+  fields = INWARD_FIELDS,
+  loadValues = getInwardNameValues,
+  renameValues = renameInwardNames,
+  entityLabel = "inward entry",
+  entityLabelPlural = "inward entries",
+  confirmExtra = "",
+}) {
+  const [field, setField] = useState(fields[0]?.key || "vendor");
   const [values, setValues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -38,13 +56,19 @@ export default function RenameFieldNames({ onClose, onRenamed }) {
   const [renameTo, setRenameTo] = useState("");
 
   useEffect(() => {
+    if (!fields.some((f) => f.key === field) && fields[0]) {
+      setField(fields[0].key);
+    }
+  }, [fields, field]);
+
+  useEffect(() => {
     let cancel = false;
     setLoading(true);
     setErr("");
     setSelected(new Set());
     setRenameTo("");
     setNotice("");
-    getInwardNameValues(field)
+    loadValues(field)
       .then((data) => {
         if (!cancel) setValues(Array.isArray(data?.values) ? data.values : []);
       })
@@ -57,7 +81,7 @@ export default function RenameFieldNames({ onClose, onRenamed }) {
     return () => {
       cancel = true;
     };
-  }, [field]);
+  }, [field, loadValues]);
 
   const groups = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -72,6 +96,9 @@ export default function RenameFieldNames({ onClose, onRenamed }) {
     () => groupValues(values).filter((group) => group.mixed).length,
     [values]
   );
+
+  const activeField = fields.find((f) => f.key === field) || fields[0];
+  const label = activeField?.label || field;
 
   function toggle(value) {
     setSelected((prev) => {
@@ -111,9 +138,10 @@ export default function RenameFieldNames({ onClose, onRenamed }) {
       setErr("The selected names are already that spelling.");
       return;
     }
+    const plural = changing.length === 1 ? entityLabel : entityLabelPlural;
     if (
       !window.confirm(
-        `Rename ${changing.length} ${field} name${changing.length === 1 ? "" : "s"} to "${to}"?\n\nEvery inward entry using those names will be updated.`
+        `Rename ${changing.length} ${label} name${changing.length === 1 ? "" : "s"} to "${to}"?\n\nEvery ${plural} using those names will be updated.${confirmExtra ? `\n${confirmExtra}` : ""}`
       )
     ) {
       return;
@@ -122,13 +150,14 @@ export default function RenameFieldNames({ onClose, onRenamed }) {
     setErr("");
     setNotice("");
     try {
-      const result = await renameInwardNames(field, changing, to);
+      const result = await renameValues(field, changing, to);
+      const n = result.updated || 0;
       setNotice(
-        `Updated ${result.updated || 0} inward entr${result.updated === 1 ? "y" : "ies"} to "${result.to || to}".`
+        `Updated ${n} ${n === 1 ? entityLabel : entityLabelPlural} to "${result.to || to}".`
       );
       setSelected(new Set());
       setRenameTo("");
-      const data = await getInwardNameValues(field);
+      const data = await loadValues(field);
       setValues(Array.isArray(data?.values) ? data.values : []);
       if (onRenamed) await onRenamed();
     } catch (e) {
@@ -137,8 +166,6 @@ export default function RenameFieldNames({ onClose, onRenamed }) {
       setSaving(false);
     }
   }
-
-  const label = field === "vendor" ? "Vendor" : "Category";
 
   return createPortal(
     <div style={overlay} onClick={onClose}>
@@ -157,14 +184,14 @@ export default function RenameFieldNames({ onClose, onRenamed }) {
         </div>
 
         <div style={tabs}>
-          {["vendor", "category"].map((key) => (
+          {fields.map((f) => (
             <button
-              key={key}
+              key={f.key}
               type="button"
-              className={field === key ? "btn btn-in btn-sm" : "btn btn-ghost btn-sm"}
-              onClick={() => setField(key)}
+              className={field === f.key ? "btn btn-in btn-sm" : "btn btn-ghost btn-sm"}
+              onClick={() => setField(f.key)}
             >
-              {key === "vendor" ? "Vendor" : "Category"}
+              {f.label}
             </button>
           ))}
           <input
@@ -337,5 +364,4 @@ const inputStyle = {
   borderRadius: 8,
   padding: "0 10px",
   font: "inherit",
-  background: "var(--paper, #fff)",
 };

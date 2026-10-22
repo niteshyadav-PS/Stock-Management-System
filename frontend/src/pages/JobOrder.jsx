@@ -3,11 +3,48 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { todayStr } from "../utils/helpers";
-import { unwrapList } from "../api/api";
+import {
+  unwrapList,
+  getJobOrderNameValues,
+  renameJobOrderNames,
+} from "../api/api";
 import Pagination from "../components/Pagination";
+import RenameFieldNames from "../components/RenameFieldNames";
 import VendorQc from "./VendorQc";
 import useClientPagination from "../hooks/useClientPagination";
 import { vendorsForJobType } from "../utils/jobOrderVendors";
+
+const JO_RENAME_FIELDS = [
+  { key: "sendFromName", label: "Send From" },
+  { key: "vendorName", label: "Send To" },
+  { key: "issuedBy", label: "Issued By" },
+];
+
+// Case/whitespace-insensitive key so "AS Engineering" and "AS ENGINEERING" collapse.
+function filterNameKey(v) {
+  return String(v || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function dedupeFilterValues(values) {
+  const map = new Map();
+  for (const raw of values || []) {
+    if (raw == null || raw === "") continue;
+    const display = String(raw).trim().replace(/\s+/g, " ");
+    if (!display) continue;
+    const key = display.toLowerCase();
+    if (!map.has(key)) map.set(key, display);
+  }
+  return [...map.values()];
+}
+
+function matchesColFilter(selected, value) {
+  if (!selected?.length) return true;
+  const key = filterNameKey(value);
+  return selected.some((s) => filterNameKey(s) === key);
+}
 
 // ── Excel-style dropdown filter (same pattern as Live Stock) ──────────────────
 function ColFilter({ values, selected, onChange }) {
@@ -67,14 +104,16 @@ function ColFilter({ values, selected, onChange }) {
     setOpen((v) => !v);
   }
 
-  const unique = [...new Set(values.filter(Boolean))];
+  const unique = dedupeFilterValues(values);
   const toNum = (v) => {
     const c = String(v).replace(/[^0-9.\-]/g, "");
     return c === "" || c === "-" ? NaN : parseFloat(c);
   };
-  const isNum = unique.every((v) => !isNaN(toNum(v)));
+  const isNum = unique.length > 0 && unique.every((v) => !isNaN(toNum(v)));
   unique.sort((a, b) =>
-    isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
+    isNum
+      ? toNum(a) - toNum(b)
+      : String(a).localeCompare(String(b), undefined, { sensitivity: "base" }),
   );
 
   const filtered = unique.filter((v) =>
@@ -3908,8 +3947,13 @@ export default function JobOrder({ jobType = "powder_coating" }) {
   const canCreate = CREATE_ROLES.includes(user?.role);
   const canReceive = RECEIVE_ROLES.includes(user?.role);
   const isAdmin = user?.role === "admin";
+  const canRenameNames =
+    user?.role === "admin" ||
+    user?.role === "store_manager" ||
+    user?.role === "purchase";
   const [orders, setOrders] = useState([]);
   const [showForm, setShowForm] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [viewOrder, setViewOrder] = useState(null);
   const [openOrderId, setOpenOrderId] = useState(null);
   const [actionsMenuId, setActionsMenuId] = useState(null);
@@ -3967,6 +4011,16 @@ export default function JobOrder({ jobType = "powder_coating" }) {
       setLoading(false);
     }
   }, [resolvedJobType]);
+
+  const loadJoNameValues = useCallback(
+    (field) => getJobOrderNameValues(field, { jobType: resolvedJobType }),
+    [resolvedJobType],
+  );
+  const renameJoNames = useCallback(
+    (field, from, to) =>
+      renameJobOrderNames(field, from, to, { jobType: resolvedJobType }),
+    [resolvedJobType],
+  );
   useEffect(() => {
     resetForm();
     setViewOrder(null);
@@ -4283,50 +4337,19 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         const dispatchedQty = orderDispatchedQty(o);
         const receivedQty = orderReceivedQty(o);
 
-        if (colFilters.challanNo.length && !colFilters.challanNo.includes(o.srNo))
+        if (!matchesColFilter(colFilters.challanNo, o.srNo)) return false;
+        if (!matchesColFilter(colFilters.date, formatDate(o.date))) return false;
+        if (!matchesColFilter(colFilters.sendFrom, o.sendFromName)) return false;
+        if (!matchesColFilter(colFilters.sendTo, o.vendorName)) return false;
+        if (!matchesColFilter(colFilters.vehicleNo, o.vehicleNo)) return false;
+        if (!matchesColFilter(colFilters.issuedBy, o.issuedBy)) return false;
+        if (!matchesColFilter(colFilters.dispatchedQty, String(dispatchedQty)))
           return false;
-        if (
-          colFilters.date.length &&
-          !colFilters.date.includes(formatDate(o.date))
-        )
+        if (!matchesColFilter(colFilters.receivedQty, String(receivedQty)))
           return false;
-        if (
-          colFilters.sendFrom.length &&
-          !colFilters.sendFrom.includes(o.sendFromName)
-        )
+        if (!matchesColFilter(colFilters.vendorExpected, vendorExpectedLabel(o)))
           return false;
-        if (colFilters.sendTo.length && !colFilters.sendTo.includes(o.vendorName))
-          return false;
-        if (
-          colFilters.vehicleNo.length &&
-          !colFilters.vehicleNo.includes(o.vehicleNo)
-        )
-          return false;
-        if (
-          colFilters.issuedBy.length &&
-          !colFilters.issuedBy.includes(o.issuedBy)
-        )
-          return false;
-        if (
-          colFilters.dispatchedQty.length &&
-          !colFilters.dispatchedQty.includes(String(dispatchedQty))
-        )
-          return false;
-        if (
-          colFilters.receivedQty.length &&
-          !colFilters.receivedQty.includes(String(receivedQty))
-        )
-          return false;
-        if (
-          colFilters.vendorExpected?.length &&
-          !colFilters.vendorExpected.includes(vendorExpectedLabel(o))
-        )
-          return false;
-        if (
-          colFilters.status.length &&
-          !colFilters.status.includes(statusLabel(o))
-        )
-          return false;
+        if (!matchesColFilter(colFilters.status, statusLabel(o))) return false;
         return true;
       });
     },
@@ -5379,7 +5402,16 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           <h2>{meta.label}</h2>
           <p>Track challans sent for work and received back.</p>
         </div>
-        <div className="no-print">
+        <div className="no-print" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {canRenameNames && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setRenameOpen(true)}
+            >
+              Fix duplicate names
+            </button>
+          )}
           {!showForm && canCreate && (
             <button className="btn btn-in" onClick={() => setShowForm(true)}>
               {meta.newButton}
@@ -5387,6 +5419,18 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           )}
         </div>
       </div>
+      {canRenameNames && renameOpen && (
+        <RenameFieldNames
+          onClose={() => setRenameOpen(false)}
+          onRenamed={load}
+          fields={JO_RENAME_FIELDS}
+          loadValues={loadJoNameValues}
+          renameValues={renameJoNames}
+          entityLabel="job order"
+          entityLabelPlural="job orders"
+          confirmExtra="Send To also updates matching vendor login company names."
+        />
+      )}
 
       {/* ── Create form ── */}
       {showForm && canCreate && (

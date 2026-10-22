@@ -203,6 +203,114 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 
+// Send From / Send To / Issued By spellings used on job orders (for rename UI).
+const JO_NAME_FIELDS = {
+  sendFromName: "Send From",
+  vendorName: "Send To",
+  issuedBy: "Issued By",
+};
+
+router.get(
+  "/name-values",
+  authMiddleware,
+  requireRole("admin", "store_manager", "purchase"),
+  async (req, res) => {
+    try {
+      const field = String(req.query.field || "");
+      if (!JO_NAME_FIELDS[field]) {
+        return res
+          .status(400)
+          .json({ error: "Choose Send From, Send To, or Issued By." });
+      }
+      const match = { [field]: { $nin: [null, ""] } };
+      const jobType = String(req.query.jobType || "").trim();
+      if (jobType === "powder_coating" || jobType === "fabrication") {
+        match.jobType = jobType;
+      }
+      const rows = await JobOrder.aggregate([
+        { $match: match },
+        { $group: { _id: `$${field}`, count: { $sum: 1 } } },
+        { $sort: { count: -1, _id: 1 } },
+      ]);
+      res.json({
+        field,
+        values: rows
+          .filter((row) => String(row._id || "").trim())
+          .map((row) => ({ value: String(row._id), count: row.count || 0 })),
+      });
+    } catch (err) {
+      console.error("[job-orders GET /name-values] ", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// Merge selected spellings into one name on job orders (and vendor logins for Send To).
+router.post(
+  "/rename-names",
+  authMiddleware,
+  requireRole("admin", "store_manager", "purchase"),
+  async (req, res) => {
+    try {
+      const field = String(req.body.field || "");
+      if (!JO_NAME_FIELDS[field]) {
+        return res
+          .status(400)
+          .json({ error: "Choose Send From, Send To, or Issued By." });
+      }
+      const to = String(req.body.to || "")
+        .trim()
+        .replace(/\s+/g, " ");
+      if (!to) return res.status(400).json({ error: "Enter the name to use." });
+
+      const from = [
+        ...new Set(
+          (Array.isArray(req.body.from) ? req.body.from : [])
+            .map((value) => String(value ?? ""))
+            .filter((value) => value.trim() && value !== to),
+        ),
+      ];
+      if (!from.length) {
+        return res
+          .status(400)
+          .json({ error: "Select at least one name to change." });
+      }
+      if (from.length > 200) {
+        return res.status(400).json({ error: "Select fewer names at once." });
+      }
+
+      const filter = { [field]: { $in: from } };
+      const jobType = String(req.body.jobType || "").trim();
+      if (jobType === "powder_coating" || jobType === "fabrication") {
+        filter.jobType = jobType;
+      }
+
+      const orderResult = await JobOrder.updateMany(filter, {
+        $set: { [field]: to },
+      });
+
+      let usersUpdated = 0;
+      // Keep vendor logins linked when Send To (vendor company) is renamed.
+      if (field === "vendorName") {
+        const userResult = await User.updateMany(
+          { role: "vendor", vendorName: { $in: from } },
+          { $set: { vendorName: to } },
+        );
+        usersUpdated = userResult.modifiedCount || 0;
+      }
+
+      res.json({
+        updated: orderResult.modifiedCount || 0,
+        usersUpdated,
+        to,
+      });
+    } catch (err) {
+      console.error("[job-orders POST /rename-names] ", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // ── GET /api/job-orders/:id ───────────────────────────────────────────────────
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
