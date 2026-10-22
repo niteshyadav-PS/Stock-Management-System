@@ -63,6 +63,14 @@ function reworkQty(item) {
   return Math.max(0, round3(rejected - sentBack));
 }
 
+function scrapQty(item) {
+  const total = (item?.qcRounds || []).reduce((sum, round) => {
+    if (round.status !== "inspected") return sum;
+    return sum + num(round.scrapQty);
+  }, 0);
+  return round3(total);
+}
+
 function readyToDispatchQty(item) {
   const total = (item?.qcRounds || []).reduce((sum, round) => {
     if (round.status !== "inspected") return sum;
@@ -83,11 +91,15 @@ function itemPipelineStatus(item, order) {
   const ready = submittedReadyQty(item);
   const pending = pendingQcQty(item);
   const rework = reworkQty(item);
+  const scrap = scrapQty(item);
   const dispatch = readyToDispatchQty(item);
   const received = num(item?.receivedQty);
   if (orderQty > 0 && received >= orderQty - 0.001) return "Fully received";
   if (pending > 0.001) return "With QC";
   if (rework > 0.001) return "Rework open";
+  if (scrap > 0.001 && pending <= 0.001 && rework <= 0.001 && receivableNow(item) <= 0.001) {
+    return "Rejected (scrap)";
+  }
   if (receivableNow(item) > 0.001) return "Ready to receive";
   if (dispatch > 0.001 && received < dispatch - 0.001) return "Ready to dispatch";
   if (orderQty > 0 && ready >= orderQty - 0.001) return "Inspection complete";
@@ -113,6 +125,7 @@ function lineMetrics(order, item, itemIndex) {
   const pending = pendingQcQty(item);
   const dispatch = readyToDispatchQty(item);
   const rework = reworkQty(item);
+  const scrap = scrapQty(item);
   const received = num(item?.receivedQty);
   const receivable = receivableNow(item);
   return {
@@ -136,6 +149,7 @@ function lineMetrics(order, item, itemIndex) {
     pending,
     dispatch,
     rework,
+    scrap,
     received,
     receivable,
     balance: Math.max(0, round3(orderQty - received)),
@@ -143,15 +157,34 @@ function lineMetrics(order, item, itemIndex) {
   };
 }
 
+function lineMatchesKpi(line, kpiId) {
+  if (kpiId === "total") return true;
+  if (kpiId === "awaiting_ack") return !line.acknowledged;
+  if (kpiId === "pending_qc") return line.pending > 0.001;
+  if (kpiId === "rework") return line.rework > 0.001;
+  if (kpiId === "rejected") return line.scrap > 0.001;
+  if (kpiId === "ready_dispatch") return line.dispatch > 0.001;
+  if (kpiId === "receivable") return line.receivable > 0.001;
+  if (kpiId === "partial") {
+    return line.orderStatus === "partial" || (line.received > 0.001 && line.balance > 0.001);
+  }
+  if (kpiId === "completed") {
+    return line.orderStatus === "received" || (line.orderQty > 0 && line.received >= line.orderQty - 0.001);
+  }
+  return true;
+}
+
+// Card value: "challans" = distinct challans, "lines" = matching item rows (same as table).
 const KPI_CARDS = [
-  { id: "total", label: "Total challans", tone: "ink", hint: "All loaded job orders" },
-  { id: "awaiting_ack", label: "Awaiting vendor", tone: "rust", hint: "Not yet received by vendor" },
-  { id: "pending_qc", label: "Pending QC", tone: "amber", hint: "Lots waiting with QC" },
-  { id: "rework", label: "Rework open", tone: "rust", hint: "Rejected qty still open" },
-  { id: "ready_dispatch", label: "Ready to dispatch", tone: "teal", hint: "Challans with QC-approved qty" },
-  { id: "receivable", label: "Can receive", tone: "teal", hint: "Store can take material now" },
-  { id: "partial", label: "Partial receive", tone: "amber", hint: "Partially received at store" },
-  { id: "completed", label: "Fully received", tone: "ink", hint: "All qty received at store" },
+  { id: "total", label: "Total challans", tone: "ink", hint: "All loaded job orders", countBy: "challans" },
+  { id: "awaiting_ack", label: "Awaiting vendor", tone: "rust", hint: "Not yet received by vendor", countBy: "challans" },
+  { id: "pending_qc", label: "Pending QC", tone: "amber", hint: "Item lots waiting with QC", countBy: "lines" },
+  { id: "rework", label: "Rework open", tone: "rust", hint: "Items sent back for rework", countBy: "lines" },
+  { id: "rejected", label: "Rejected", tone: "rust", hint: "Items permanently rejected", countBy: "lines" },
+  { id: "ready_dispatch", label: "Ready to dispatch", tone: "teal", hint: "Items with QC-approved qty", countBy: "lines" },
+  { id: "receivable", label: "Can receive", tone: "teal", hint: "Items store can take now", countBy: "lines" },
+  { id: "partial", label: "Partial receive", tone: "amber", hint: "Partially received at store", countBy: "challans" },
+  { id: "completed", label: "Fully received", tone: "ink", hint: "All qty received at store", countBy: "challans" },
 ];
 
 export default function JobOrderDashboard() {
@@ -202,59 +235,29 @@ export default function JobOrderDashboard() {
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }, [lines]);
 
-  const orderStats = useMemo(() => {
-    return orders.map((order) => {
-      const items = order.items || [];
-      const acknowledged = isVendorAcknowledged(order);
-      const hasPendingQc = items.some((it) => pendingQcQty(it) > 0.001);
-      const hasRework = items.some((it) => reworkQty(it) > 0.001);
-      const readyDispatch = round3(items.reduce((s, it) => s + readyToDispatchQty(it), 0));
-      const receivable = round3(items.reduce((s, it) => s + receivableNow(it), 0));
-      const completed = (order.status || "issued") === "received";
-      const partial = (order.status || "issued") === "partial";
-      return {
-        order,
-        awaitingAck: !acknowledged,
-        hasPendingQc,
-        hasRework,
-        readyDispatch,
-        receivable,
-        completed,
-        partial,
-      };
-    });
-  }, [orders]);
+  // Scope used for card counts — same vendor filter as the table (not search).
+  const scopedLines = useMemo(() => {
+    if (vendorFilter === "all") return lines;
+    return lines.filter((l) => l.vendorName === vendorFilter);
+  }, [lines, vendorFilter]);
 
   const counts = useMemo(() => {
-    const map = {
-      total: orderStats.length,
-      awaiting_ack: 0,
-      pending_qc: 0,
-      rework: 0,
-      ready_dispatch: 0,
-      receivable: 0,
-      partial: 0,
-      completed: 0,
-    };
-    for (const row of orderStats) {
-      if (row.awaitingAck) map.awaiting_ack += 1;
-      if (row.hasPendingQc) map.pending_qc += 1;
-      if (row.hasRework) map.rework += 1;
-      if (row.readyDispatch > 0.001) map.ready_dispatch += 1;
-      if (row.receivable > 0.001) map.receivable += 1;
-      if (row.partial) map.partial += 1;
-      if (row.completed) map.completed += 1;
+    const out = {};
+    for (const card of KPI_CARDS) {
+      const matching = scopedLines.filter((l) => lineMatchesKpi(l, card.id));
+      if (card.countBy === "lines") {
+        out[card.id] = matching.length;
+      } else {
+        out[card.id] = new Set(matching.map((l) => l.orderId)).size;
+      }
     }
-    return map;
-  }, [orderStats]);
+    return out;
+  }, [scopedLines]);
 
   const q = normalize(search);
 
   const filteredLines = useMemo(() => {
-    let list = lines;
-    if (vendorFilter !== "all") {
-      list = list.filter((l) => l.vendorName === vendorFilter);
-    }
+    let list = scopedLines;
     if (q) {
       list = list.filter((l) => {
         const hay = normalize(
@@ -272,24 +275,15 @@ export default function JobOrderDashboard() {
       });
     }
     if (activeKpi !== "total") {
-      const orderIds = new Set(
-        orderStats
-          .filter((row) => {
-            if (activeKpi === "awaiting_ack") return row.awaitingAck;
-            if (activeKpi === "pending_qc") return row.hasPendingQc;
-            if (activeKpi === "rework") return row.hasRework;
-            if (activeKpi === "ready_dispatch") return row.readyDispatch > 0.001;
-            if (activeKpi === "receivable") return row.receivable > 0.001;
-            if (activeKpi === "partial") return row.partial;
-            if (activeKpi === "completed") return row.completed;
-            return true;
-          })
-          .map((row) => row.order._id),
-      );
-      list = list.filter((l) => orderIds.has(l.orderId));
+      list = list.filter((l) => lineMatchesKpi(l, activeKpi));
     }
     return list;
-  }, [lines, vendorFilter, q, activeKpi, orderStats]);
+  }, [scopedLines, q, activeKpi]);
+
+  const filteredChallanCount = useMemo(
+    () => new Set(filteredLines.map((l) => l.orderId)).size,
+    [filteredLines],
+  );
 
   const vendorSummary = useMemo(() => {
     if (!q) return [];
@@ -309,6 +303,7 @@ export default function JobOrderDashboard() {
           pending: 0,
           dispatch: 0,
           rework: 0,
+          scrap: 0,
           received: 0,
           receivable: 0,
           balance: 0,
@@ -322,6 +317,7 @@ export default function JobOrderDashboard() {
       row.pending = round3(row.pending + line.pending);
       row.dispatch = round3(row.dispatch + line.dispatch);
       row.rework = round3(row.rework + line.rework);
+      row.scrap = round3(row.scrap + line.scrap);
       row.received = round3(row.received + line.received);
       row.receivable = round3(row.receivable + line.receivable);
       row.balance = round3(row.balance + line.balance);
@@ -347,6 +343,7 @@ export default function JobOrderDashboard() {
         pending: round3(acc.pending + line.pending),
         dispatch: round3(acc.dispatch + line.dispatch),
         rework: round3(acc.rework + line.rework),
+        scrap: round3(acc.scrap + line.scrap),
         received: round3(acc.received + line.received),
         receivable: round3(acc.receivable + line.receivable),
         balance: round3(acc.balance + line.balance),
@@ -357,6 +354,7 @@ export default function JobOrderDashboard() {
         pending: 0,
         dispatch: 0,
         rework: 0,
+        scrap: 0,
         received: 0,
         receivable: 0,
         balance: 0,
@@ -796,6 +794,7 @@ export default function JobOrderDashboard() {
                         <th className="num">Pending QC</th>
                         <th className="num">Dispatch</th>
                         <th className="num">Rework</th>
+                        <th className="num">Rejected</th>
                         <th className="num">Received</th>
                         <th className="num">Balance</th>
                         <th>Status</th>
@@ -817,6 +816,7 @@ export default function JobOrderDashboard() {
                           <td className="num">{row.pending ? formatQty(row.pending) : "—"}</td>
                           <td className="num">{row.dispatch ? formatQty(row.dispatch) : "—"}</td>
                           <td className="num">{row.rework ? formatQty(row.rework) : "—"}</td>
+                          <td className="num">{row.scrap ? formatQty(row.scrap) : "—"}</td>
                           <td className="num">{formatQty(row.received)}</td>
                           <td className="num">{formatQty(row.balance)}</td>
                           <td title={row.statusText}>
@@ -838,7 +838,12 @@ export default function JobOrderDashboard() {
           <div>
             <h3>
               {q ? "Matching line details" : activeLabel}
-              <span className="pill-count">{filteredLines.length}</span>
+              <span className="pill-count">
+                {filteredLines.length} item{filteredLines.length === 1 ? "" : "s"}
+                {filteredChallanCount > 0
+                  ? ` · ${filteredChallanCount} challan${filteredChallanCount === 1 ? "" : "s"}`
+                  : ""}
+              </span>
             </h3>
           </div>
         </div>
@@ -881,7 +886,11 @@ export default function JobOrderDashboard() {
                 <tbody>
                   {filteredLines.map((line) => {
                     let pill = "";
-                    if (line.pipeline.includes("Awaiting") || line.pipeline.includes("Rework")) pill = "warn";
+                    if (
+                      line.pipeline.includes("Awaiting")
+                      || line.pipeline.includes("Rework")
+                      || line.pipeline.includes("Rejected")
+                    ) pill = "warn";
                     else if (line.pipeline.includes("QC") || line.pipeline.includes("Partial")) pill = "amber";
                     else if (line.pipeline.includes("receive") || line.pipeline.includes("dispatch")) pill = "teal";
                     else if (line.pipeline.includes("complete") || line.pipeline.includes("Fully")) pill = "ok";
@@ -892,6 +901,7 @@ export default function JobOrderDashboard() {
                       line.process,
                       line.pending ? `QC ${formatQty(line.pending)}` : null,
                       line.rework ? `Rework ${formatQty(line.rework)}` : null,
+                      line.scrap ? `Rejected ${formatQty(line.scrap)}` : null,
                       line.receivable ? `Avail ${formatQty(line.receivable)}` : null,
                     ]
                       .filter(Boolean)
