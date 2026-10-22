@@ -4822,29 +4822,6 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           gap: 8px;
           margin-bottom: 10px;
         }
-        .jo-list-head-tools {
-          display: flex;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-left: auto;
-        }
-        .jo-list-search {
-          width: min(280px, 100%);
-          min-width: 160px;
-          height: 34px;
-          padding: 0 12px;
-          border: 1.5px solid var(--line);
-          border-radius: 8px;
-          font-size: 13px;
-          background: #fff;
-          color: var(--ink);
-        }
-        .jo-list-search:focus {
-          outline: none;
-          border-color: var(--teal);
-          box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.12);
-        }
         .jo-status-filters {
           display: flex;
           gap: 6px;
@@ -5641,24 +5618,23 @@ export default function JobOrder({ jobType = "powder_coating" }) {
               {meta.listTitle} <span className="pill-count">{visible.length}</span>
             </h3>
           </div>
-          <div className="jo-list-head-tools">
-            <input
-              type="search"
-              className="jo-list-search"
-              value={listSearch}
-              onChange={(e) => setListSearch(e.target.value)}
-              placeholder="Search challan, vendor, item…"
-              aria-label={`Search ${meta.listTitle}`}
-            />
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={clearJoFilters}
-              disabled={!hasActiveFilters}
-            >
-              Clear filters
-            </button>
-          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={clearJoFilters}
+            disabled={!hasActiveFilters}
+          >
+            Clear filters
+          </button>
+        </div>
+        <div className="searchbar">
+          <input
+            type="search"
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            placeholder="Search challan, vendor, item…"
+            aria-label={`Search ${meta.listTitle}`}
+          />
         </div>
 
         {loading ? (
