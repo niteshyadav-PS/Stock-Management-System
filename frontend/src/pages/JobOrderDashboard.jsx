@@ -363,8 +363,10 @@ export default function JobOrderDashboard() {
   }, [filteredLines]);
 
   function selectKpi(id) {
-    if (id === activeKpi) return;
-    setActiveKpi(id);
+    // Second click on the same card clears the filter (back to all challans).
+    const next = id === activeKpi ? "total" : id;
+    if (next === activeKpi) return;
+    setActiveKpi(next);
     setPanelKey((k) => k + 1);
   }
 
