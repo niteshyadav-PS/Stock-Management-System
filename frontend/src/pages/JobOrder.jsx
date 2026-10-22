@@ -375,7 +375,7 @@ const API = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL.replace(/\/+$/, "")}/api`
   : "/api";
 async function apiGet(path) {
-  const token = localStorage.getItem("sy_token");
+  const token = sessionStorage.getItem("sy_token");
   const res = await fetch(`${API}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -391,7 +391,7 @@ async function apiGet(path) {
   return res.json();
 }
 async function apiDelete(path) {
-  const token = localStorage.getItem("sy_token");
+  const token = sessionStorage.getItem("sy_token");
   const res = await fetch(`${API}${path}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
@@ -414,7 +414,7 @@ async function apiDelete(path) {
   }
 }
 async function apiPost(path, body) {
-  const token = localStorage.getItem("sy_token");
+  const token = sessionStorage.getItem("sy_token");
   const res = await fetch(`${API}${path}`, {
     method: "POST",
     headers: {
@@ -435,7 +435,7 @@ async function apiPost(path, body) {
   return res.json();
 }
 async function apiPatch(path, body) {
-  const token = localStorage.getItem("sy_token");
+  const token = sessionStorage.getItem("sy_token");
   const res = await fetch(`${API}${path}`, {
     method: "PATCH",
     headers: {

@@ -13,7 +13,7 @@ const client = axios.create({
 // ── Request interceptor — always attach JWT if present ────────────────────────
 client.interceptors.request.use(
   (cfg) => {
-    const token = localStorage.getItem("sy_token");
+    const token = sessionStorage.getItem("sy_token");
     if (token) {
       cfg.headers = cfg.headers || {};
       cfg.headers["Authorization"] = `Bearer ${token}`;
@@ -32,8 +32,14 @@ client.interceptors.response.use(
 
     // Token expired or invalid → clear storage and reload to login
     if (status === 401) {
-      localStorage.removeItem("sy_token");
-      localStorage.removeItem("sy_user");
+      sessionStorage.removeItem("sy_token");
+      sessionStorage.removeItem("sy_user");
+      try {
+        localStorage.removeItem("sy_token");
+        localStorage.removeItem("sy_user");
+      } catch {
+        /* ignore */
+      }
       // Only redirect if not already on login page
       if (!window.location.pathname.includes("/login")) {
         window.location.href = "/login";
