@@ -782,7 +782,29 @@ function statusLabel(order) {
 }
 
 function qcSummary(order) {
-  if (!String(order?.vendorExpectedDate || "").trim()) {
+  const pct = receivePercent(order);
+  const fullyReceived =
+    order?.status === "received" || pct >= 100;
+  const vendorAcked = !!String(order?.vendorExpectedDate || "").trim();
+
+  // Store already took full qty — don't keep saying "Awaiting vendor"
+  // (common on older challans that never got a vendor expected date).
+  if (fullyReceived) {
+    let dispatch = 0;
+    for (const it of order?.items || []) {
+      for (const round of it.qcRounds || []) {
+        if (round.status === "inspected") {
+          dispatch += Number(round.dispatchQty) || 0;
+        }
+      }
+    }
+    if (dispatch > 0.001) {
+      return `${Math.round(dispatch * 1000) / 1000} dispatch · Done`;
+    }
+    return "Received at store";
+  }
+
+  if (!vendorAcked) {
     return "Awaiting vendor";
   }
   let pending = 0;

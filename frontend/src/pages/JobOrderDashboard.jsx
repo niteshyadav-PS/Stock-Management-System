@@ -86,7 +86,6 @@ function receivableNow(item) {
 }
 
 function itemPipelineStatus(item, order) {
-  if (!isVendorAcknowledged(order)) return "Awaiting vendor receive";
   const orderQty = num(item?.qty);
   const ready = submittedReadyQty(item);
   const pending = pendingQcQty(item);
@@ -94,7 +93,10 @@ function itemPipelineStatus(item, order) {
   const scrap = scrapQty(item);
   const dispatch = readyToDispatchQty(item);
   const received = num(item?.receivedQty);
+  // Store already took full qty — don't keep "Awaiting vendor" on old challans.
   if (orderQty > 0 && received >= orderQty - 0.001) return "Fully received";
+  if (order?.status === "received") return "Fully received";
+  if (!isVendorAcknowledged(order)) return "Awaiting vendor receive";
   if (pending > 0.001) return "With QC";
   if (rework > 0.001) return "Rework open";
   if (scrap > 0.001 && pending <= 0.001 && rework <= 0.001 && receivableNow(item) <= 0.001) {
