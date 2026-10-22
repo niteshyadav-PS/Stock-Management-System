@@ -180,23 +180,13 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       const params = lockedJobType ? { jobType: lockedJobType } : {};
       const list = unwrapList(await getJobOrders(params));
       setOrders(list);
-      if (isVendor) {
-        const pendingAck = list.find((order) => !isVendorAcknowledged(order));
-        if (pendingAck) {
-          setAckOrder(pendingAck);
-          setAckExpectedDate(todayStr());
-          setAckNote("");
-          setAckErr("");
-        } else {
-          setAckOrder(null);
-        }
-      }
+      // Do not auto-open Receive modal on load/refresh — vendor opens it via Receive.
     } catch (err) {
       setMsg({ text: err.message, ok: false });
     } finally {
       setLoading(false);
     }
-  }, [isVendor, lockedJobType]);
+  }, [lockedJobType]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -345,8 +335,12 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       return;
     }
     const next = {};
-    for (const { itemIndex } of actionable) {
-      next[itemIndex] = { qty: "", rework: "" };
+    for (const { itemIndex, remaining, rework } of actionable) {
+      // Prefill like QC Check all — remaining lot qty / open rework qty.
+      next[itemIndex] = {
+        qty: remaining > 0.001 ? String(remaining) : "",
+        rework: rework > 0.001 ? String(rework) : "",
+      };
     }
     setBulkDrafts(next);
     setQcDialogErr("");
@@ -1019,8 +1013,17 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     const remaining = Math.round((orderQty - sent) * 1000) / 1000;
     const vendorLimit = Math.min(orderQty, remaining);
     const rowError = rowErrors[row.key] || "";
-    const vendorQty = draft.qty === "" || draft.qty == null ? NaN : Number(draft.qty);
+    // Prefill ready qty with remaining (same idea as QC Accept = With QC).
+    const qtyFilled =
+      draft.qty === undefined || draft.qty === null
+        ? (vendorLimit > 0.001 ? String(vendorLimit) : "")
+        : draft.qty;
+    const vendorQty = qtyFilled === "" ? NaN : Number(qtyFilled);
     const vendorOver = Number.isFinite(vendorQty) && vendorQty - vendorLimit > 0.001;
+    const reworkFilled =
+      draft.rework === undefined || draft.rework === null
+        ? (rework > 0.001 ? String(rework) : "")
+        : draft.rework;
 
     function rejectOver(limit) {
       const text = `Cannot update more than the quantity (${formatQty(limit)}).`;
@@ -1038,7 +1041,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                 min="0.001"
                 max={vendorLimit}
                 step="any"
-                value={draft.qty ?? ""}
+                value={qtyFilled}
                 placeholder={sent ? `Another lot, max ${formatQty(vendorLimit)}` : `Ready qty, max ${formatQty(orderQty)}`}
                 title={`Cannot update more than the quantity (${formatQty(vendorLimit)})`}
                 onChange={(e) => {
@@ -1063,7 +1066,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                 className="btn btn-in btn-sm"
                 disabled={!!busyKey || vendorOver}
                 onClick={() => {
-                  const qty = Number(draft.qty);
+                  const qty = Number(qtyFilled);
                   if (!Number.isFinite(qty) || qty <= 0) {
                     setMsg({ text: "Enter the quantity for this lot.", ok: false });
                     return;
@@ -1102,7 +1105,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                 min="0.001"
                 max={rework}
                 step="any"
-                value={draft.rework ?? ""}
+                value={reworkFilled}
                 placeholder={`Rework, max ${formatQty(rework)}`}
                 title={`Cannot update more than the quantity (${formatQty(rework)})`}
                 onChange={(e) => {
@@ -1127,7 +1130,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                 className="btn btn-in btn-sm"
                 disabled={!!busyKey}
                 onClick={() => {
-                  const qty = Number(draft.rework);
+                  const qty = Number(reworkFilled);
                   if (!Number.isFinite(qty) || qty <= 0) {
                     setMsg({ text: "Enter the rework quantity.", ok: false });
                     return;
