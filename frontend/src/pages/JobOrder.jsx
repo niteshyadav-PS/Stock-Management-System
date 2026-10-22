@@ -4849,7 +4849,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         }
         .jo-orders-table {
           width: 100% !important;
-          min-width: 100% !important;
+          min-width: 1240px;
           table-layout: fixed;
           border-collapse: collapse;
         }
@@ -4871,18 +4871,26 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         .jo-orders-table .jo-th-filter {
           max-width: 100%;
         }
-        /* Fixed cols stay compact; From / To / QC grow to fill the card */
-        .jo-orders-table col.jo-col-challan { width: 78px; }
+        /* Challan needs room for AEIL/DC/26-27/… style numbers; table scrolls if needed */
+        .jo-orders-table col.jo-col-challan { width: 168px; }
         .jo-orders-table col.jo-col-date { width: 86px; }
-        .jo-orders-table col.jo-col-from { width: 22%; }
-        .jo-orders-table col.jo-col-to { width: 20%; }
-        .jo-orders-table col.jo-col-vehicle { width: 80px; }
-        .jo-orders-table col.jo-col-issued { width: 80px; }
+        .jo-orders-table col.jo-col-from { width: 16%; }
+        .jo-orders-table col.jo-col-to { width: 16%; }
+        .jo-orders-table col.jo-col-vehicle { width: 96px; }
+        .jo-orders-table col.jo-col-issued { width: 88px; }
         .jo-orders-table col.jo-col-qty { width: 52px; }
         .jo-orders-table col.jo-col-expected { width: 86px; }
-        .jo-orders-table col.jo-col-qc { width: 16%; }
+        .jo-orders-table col.jo-col-qc { width: 12%; }
         .jo-orders-table col.jo-col-status { width: 118px; }
         .jo-orders-table col.jo-col-act { width: 96px; }
+        .jo-orders-table td.jo-td-challan {
+          font-weight: 700;
+          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          line-height: 1.3;
+          font-size: 12px;
+        }
         .jo-orders-table td.jo-td-date,
         .jo-orders-table td.jo-td-qty,
         .jo-orders-table td.jo-td-expected {
@@ -5812,7 +5820,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                       onClick={() => setOpenOrderId(open ? null : order._id)}
                       style={{ cursor: "pointer", background: open ? "var(--paper-dim)" : undefined }}
                     >
-                      <td className="mono jo-td-clip" style={{ fontWeight: 700 }}>
+                      <td className="mono jo-td-challan" title={order.srNo}>
                         {open ? "▾ " : "▸ "}{order.srNo}
                       </td>
                       <td className="jo-td-date">{formatDate(order.date)}</td>

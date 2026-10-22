@@ -145,6 +145,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
   const [stageFilter, setStageFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState(lockedJobType || "all");
   const [vendorFilter, setVendorFilter] = useState("all");
+  const [listSearch, setListSearch] = useState("");
   const [msg, setMsg] = useState({ text: "", ok: true });
   const [rowErrors, setRowErrors] = useState({});
   const [busyKey, setBusyKey] = useState("");
@@ -437,8 +438,31 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
         (row) => String(row.order.vendorName || "").trim().toLowerCase() === vendorFilter.toLowerCase(),
       );
     }
+    const q = String(listSearch || "").trim().toLowerCase();
+    if (q) {
+      list = list.filter((row) => {
+        const o = row.order || {};
+        const it = row.item || {};
+        const hay = [
+          o.srNo,
+          o.date,
+          o.vendorName,
+          o.sendFromName,
+          o.vehicleNo,
+          o.issuedBy,
+          o.deliveryAddress,
+          it.description,
+          it.projectName,
+          it.process,
+          row.stage,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
     return list;
-  }, [rows, stageFilter, showVendor, vendorFilter, typeFilter, lockedJobType]);
+  }, [rows, stageFilter, showVendor, vendorFilter, typeFilter, lockedJobType, listSearch]);
 
   const vendorOrders = useMemo(() => {
     const grouped = new Map();
@@ -2243,6 +2267,22 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       )}
 
       <div className="card card-wide">
+        <div className="searchbar">
+          <input
+            type="search"
+            value={listSearch}
+            onChange={(e) => {
+              setListSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder={
+              isQc
+                ? "Search challan, vendor, item for QC…"
+                : "Search challan, vendor, item…"
+            }
+            aria-label={isQc ? "Search QC challans" : "Search challans"}
+          />
+        </div>
         {showTypeTabs && (
           <div className="vq-filters" style={{ marginBottom: 10 }}>
             {[

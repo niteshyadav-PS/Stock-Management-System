@@ -173,6 +173,7 @@ export default function VendorDashboard() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState({ text: "", ok: true });
   const [active, setActive] = useState("pending_receive");
+  const [listSearch, setListSearch] = useState("");
   const [panelKey, setPanelKey] = useState(0);
   const [leaving, setLeaving] = useState(false);
 
@@ -231,9 +232,32 @@ export default function VendorDashboard() {
 
   const activeFilter = FILTERS.find((f) => f.id === active) || FILTERS[0];
   const listRows = useMemo(() => {
-    if (active === "total") return enriched;
-    return enriched.filter((row) => activeFilter.match(row.stats));
-  }, [active, activeFilter, enriched]);
+    let list = active === "total"
+      ? enriched
+      : enriched.filter((row) => activeFilter.match(row.stats));
+    const q = String(listSearch || "").trim().toLowerCase();
+    if (q) {
+      list = list.filter(({ order }) => {
+        const itemHay = (order.items || [])
+          .map((it) => [it.description, it.projectName, it.process].join(" "))
+          .join(" ");
+        const hay = [
+          order.srNo,
+          order.date,
+          order.vehicleNo,
+          order.sendFromName,
+          order.vendorName,
+          order.issuedBy,
+          order.vendorExpectedDate,
+          itemHay,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    return list;
+  }, [active, activeFilter, enriched, listSearch]);
 
   function selectFilter(id) {
     if (id === active) return;
@@ -459,6 +483,10 @@ export default function VendorDashboard() {
           font-weight: 700;
           font-variant-numeric: tabular-nums;
           color: var(--ink);
+          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          max-width: 220px;
         }
         .vdash-actions {
           display: flex;
@@ -694,6 +722,15 @@ export default function VendorDashboard() {
               {" "}Use Receive to acknowledge, or Open to work the challan.
             </p>
           </div>
+        </div>
+        <div className="searchbar" style={{ padding: "0 4px 12px" }}>
+          <input
+            type="search"
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            placeholder="Search challan, vehicle, item…"
+            aria-label="Search challans"
+          />
         </div>
 
         <div key={panelKey} className="vdash-panel-body">
