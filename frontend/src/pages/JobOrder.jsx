@@ -486,6 +486,7 @@ const emptyItem = () => ({
 });
 
 const CREATE_ROLES = ["admin", "store_manager", "store", "purchase"];
+const RECEIVE_ROLES = ["admin", "store_manager", "store", "purchase", "viewer"];
 
 /** Preset item descriptions for Fabrication challans (searchable dropdown). */
 const FABRICATION_ITEM_DESCRIPTIONS = [
@@ -3905,6 +3906,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
   const vendors = vendorsForJobType(resolvedJobType);
 
   const canCreate = CREATE_ROLES.includes(user?.role);
+  const canReceive = RECEIVE_ROLES.includes(user?.role);
   const isAdmin = user?.role === "admin";
   const [orders, setOrders] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -3917,6 +3919,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState({ text: "", ok: true });
+  const [listSearch, setListSearch] = useState("");
   const [colFilters, setColFilters] = useState(EMPTY_COL_FILTERS);
 
   // Form state
@@ -4251,8 +4254,32 @@ export default function JobOrder({ jobType = "powder_coating" }) {
   };
 
   const visible = useMemo(
-    () =>
-      orders.filter((o) => {
+    () => {
+      const q = String(listSearch || "").trim().toLowerCase();
+      return orders.filter((o) => {
+        if (q) {
+          const itemHay = (o.items || [])
+            .map((it) =>
+              [it.description, it.projectName, it.process, it.location].join(" "),
+            )
+            .join(" ");
+          const hay = [
+            o.srNo,
+            formatDate(o.date),
+            o.sendFromName,
+            o.vendorName,
+            o.vehicleNo,
+            o.issuedBy,
+            o.deliveryAddress,
+            statusLabel(o),
+            qcSummary(o),
+            itemHay,
+          ]
+            .join(" ")
+            .toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+
         const dispatchedQty = orderDispatchedQty(o);
         const receivedQty = orderReceivedQty(o);
 
@@ -4301,15 +4328,19 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         )
           return false;
         return true;
-      }),
-    [orders, colFilters],
+      });
+    },
+    [orders, colFilters, listSearch],
   );
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(visible, 25);
 
-  const hasActiveFilters = Object.values(colFilters).some((v) => v.length > 0);
+  const hasActiveFilters =
+    Boolean(String(listSearch || "").trim()) ||
+    Object.values(colFilters).some((v) => v.length > 0);
 
   function clearJoFilters() {
+    setListSearch("");
     setColFilters(EMPTY_COL_FILTERS);
   }
 
@@ -4323,7 +4354,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         onClick: () => setEditOrder(order),
       });
     }
-    if (hasPending && canCreate) {
+    if (hasPending && canReceive) {
       menuItems.push({
         key: "receive",
         label: order.status === "partial" ? "Receive" : "Received",
@@ -4790,6 +4821,29 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           flex-wrap: wrap;
           gap: 8px;
           margin-bottom: 10px;
+        }
+        .jo-list-head-tools {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-left: auto;
+        }
+        .jo-list-search {
+          width: min(280px, 100%);
+          min-width: 160px;
+          height: 34px;
+          padding: 0 12px;
+          border: 1.5px solid var(--line);
+          border-radius: 8px;
+          font-size: 13px;
+          background: #fff;
+          color: var(--ink);
+        }
+        .jo-list-search:focus {
+          outline: none;
+          border-color: var(--teal);
+          box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.12);
         }
         .jo-status-filters {
           display: flex;
@@ -5587,14 +5641,24 @@ export default function JobOrder({ jobType = "powder_coating" }) {
               {meta.listTitle} <span className="pill-count">{visible.length}</span>
             </h3>
           </div>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={clearJoFilters}
-            disabled={!hasActiveFilters}
-          >
-            Clear filters
-          </button>
+          <div className="jo-list-head-tools">
+            <input
+              type="search"
+              className="jo-list-search"
+              value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              placeholder="Search challan, vendor, item…"
+              aria-label={`Search ${meta.listTitle}`}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={clearJoFilters}
+              disabled={!hasActiveFilters}
+            >
+              Clear filters
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -5895,9 +5959,9 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         {!loading && !visible.length && (
           <div className="empty">
             {hasActiveFilters
-              ? `No ${meta.emptyNoun} challans match these filters.`
+              ? `No ${meta.emptyNoun} challans match this search or filters.`
               : `No ${meta.emptyNoun} challans yet.`}
-            {!hasActiveFilters && (
+            {!hasActiveFilters && canCreate && (
               <p>
                 Click <strong>{meta.newButton}</strong> above to create your first
                 delivery challan.

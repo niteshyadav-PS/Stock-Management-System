@@ -7,6 +7,8 @@ const { parsePagination, paginateQuery } = require("../utils/paginate");
 
 // Matches ROLE_ACCESS.jobOrders in App.jsx
 const ALLOWED_ROLES = ["admin", "store_manager", "store", "purchase"];
+// Viewers can mark material received at store, but not create/edit/delete challans.
+const RECEIVE_ROLES = [...ALLOWED_ROLES, "viewer"];
 
 // Coerce possibly-string numeric fields safely for general math (defaults to 0
 // when unusable). Used only where a "no value" and "zero" both mean "skip".
@@ -522,7 +524,7 @@ router.patch(
 router.patch(
   "/:id/receive",
   authMiddleware,
-  requireRole(...ALLOWED_ROLES),
+  requireRole(...RECEIVE_ROLES),
   async (req, res) => {
     try {
       const { items, receivedBy, challanNo, note, receivedDate } = req.body;
