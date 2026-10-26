@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-// import { login as apiLogin } from "../api/api";
+import { login as apiLogin } from "../api/api";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 export default function Login() {
