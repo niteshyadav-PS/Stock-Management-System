@@ -3143,6 +3143,9 @@ function ReceiveModal({ order, onSave, onClose }) {
   const [siteNames, setSiteNames] = useState(() =>
     (order.items || []).map(() => ""),
   );
+  // Shared location controls — apply to every line that can still receive.
+  const [allLocation, setAllLocation] = useState(LOCATIONS[0]);
+  const [allSiteName, setAllSiteName] = useState("");
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -3182,6 +3185,24 @@ function ReceiveModal({ order, onSave, onClose }) {
   }
   function setSiteName(i, val) {
     setSiteNames((list) => list.map((v, idx) => (idx === i ? val : v)));
+  }
+
+  function applyLocationToAll(location = allLocation, site = allSiteName) {
+    setLocationInputs((list) =>
+      list.map((v, idx) =>
+        receivableNow(order.items[idx]) > 0.0001 ? location : v,
+      ),
+    );
+    setSiteNames((list) =>
+      list.map((v, idx) =>
+        receivableNow(order.items[idx]) > 0.0001
+          ? location === "Site"
+            ? site
+            : ""
+          : v,
+      ),
+    );
+    setErr("");
   }
 
   async function handleSave(e) {
@@ -3302,6 +3323,59 @@ function ReceiveModal({ order, onSave, onClose }) {
         >
           <div className="jo-modal-body">
             <div className="jo-receive-hint">Receive only ready-to-dispatch quantity.</div>
+            <div className="jo-receive-all-loc">
+              <div className="jo-receive-all-loc-title">
+                Location for all materials
+              </div>
+              <div className="jo-receive-all-loc-row">
+                <div className="field" style={{ margin: 0, minWidth: 140 }}>
+                  <label>Location</label>
+                  <select
+                    value={allLocation}
+                    onChange={(e) => {
+                      const loc = e.target.value;
+                      setAllLocation(loc);
+                      if (loc !== "Site") setAllSiteName("");
+                    }}
+                  >
+                    {LOCATIONS.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {allLocation === "Site" && (
+                  <div className="field" style={{ margin: 0, flex: 1, minWidth: 160 }}>
+                    <label>
+                      Site name <span style={{ color: "var(--red)" }}>*</span>
+                    </label>
+                    <input
+                      value={allSiteName}
+                      onChange={(e) => setAllSiteName(e.target.value)}
+                      placeholder="Type the site name"
+                    />
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-in btn-sm"
+                  style={{ alignSelf: "flex-end", height: 38 }}
+                  onClick={() => {
+                    if (allLocation === "Site" && !String(allSiteName || "").trim()) {
+                      setErr("Enter the site name before applying to all materials.");
+                      return;
+                    }
+                    applyLocationToAll(allLocation, allSiteName);
+                  }}
+                >
+                  Apply to all
+                </button>
+              </div>
+              <div className="jo-receive-all-loc-hint">
+                Sets location on every item that can still be received. You can still change one line after that.
+              </div>
+            </div>
             <div
               style={{
                 display: "flex",
@@ -4670,6 +4744,35 @@ export default function JobOrder({ jobType = "powder_coating" }) {
 }
 .jo-process-submenu--portal li { padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .jo-process-submenu--portal li:hover { background: var(--paper-dim); }
+
+        /* ── Receive-modal: apply one location to all lines ── */
+        .jo-receive-all-loc {
+          margin-bottom: 14px;
+          padding: 12px 14px;
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          background: var(--paper-dim);
+        }
+        .jo-receive-all-loc-title {
+          font-size: 12px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: #8a8270;
+          margin-bottom: 8px;
+        }
+        .jo-receive-all-loc-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          align-items: flex-end;
+        }
+        .jo-receive-all-loc-hint {
+          margin-top: 8px;
+          font-size: 12px;
+          color: var(--text-2);
+          line-height: 1.4;
+        }
 
         /* ── Receive-modal per-item row ── */
         .jo-receive-row {
