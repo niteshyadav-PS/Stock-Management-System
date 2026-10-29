@@ -88,6 +88,17 @@ export const FABRICATION_VENDORS = [
     address:
       "Plot No PAP-R,294/295/296, HNPE Knowledge, Rabale MIDC, Navi Mumbai, Thane, 400701 Maharashtra India",
   },
+  {
+    name: "HARSHAL ENTERPRISES",
+    address:
+      "MAYURESHWAR DHAM,FLAT NO 104,C WING, 1ST FLOOR,UMBARDE ROAD,UMBARDE, KALYAN(W)421201 MAHARASHTRA ",
+  },
+  {
+    name: "RLP Coating",
+    address:
+      "Shed No. 3, House No. 2260, Neelima Compound, Opp. Sayali Petrol Pump, NH-8, Vasai Phata, Vasai Road (E),Dist. Palghar – 401208, Maharashtra",
+  },
+
 ];
 
 export function vendorsForJobType(jobType) {
