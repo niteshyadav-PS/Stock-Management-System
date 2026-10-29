@@ -2,14 +2,30 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { getInwardNameValues, renameInwardNames } from "../api/api";
 
+/** Display-ish normalize (trim / case / spaces). */
 function normalizeName(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Stronger match key so near-duplicates group together in Fix names:
+ * "A S Engineering" ≈ "AS Engineering", "C - Tech" ≈ "CTECH",
+ * "Architecture & …" ≈ "Architects And …".
+ */
+function matchKey(value) {
+  return normalizeName(value)
+    .replace(/&/g, " and ")
+    .replace(/\barchitectures?\b/g, "architect")
+    .replace(/\barchitects\b/g, "architect")
+    .replace(/\belectronics\b/g, "electronic")
+    .replace(/\band\b/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function groupValues(values) {
   const map = new Map();
   for (const row of values || []) {
-    const key = normalizeName(row.value);
+    const key = matchKey(row.value);
     if (!key) continue;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(row);
@@ -175,9 +191,10 @@ export default function RenameFieldNames({
             <h3 style={{ margin: 0 }}>Fix duplicate names</h3>
             <p style={hint}>
               Tick every spelling that should become one name (e.g. Quest Enterprises and Quest Enterprises Pvt Ltd), type the correct name, then Rename.
-              Capitals/spaces that only differ are grouped together
-              {mixedCount > 0 ? ` (${mixedCount} group${mixedCount === 1 ? "" : "s"})` : ""}.
-              Different words stay as separate rows so you can merge them yourself.
+              Near-matches (capitals, spaces, hyphens, &amp;/and) are grouped at the top
+              {mixedCount > 0 ? ` — ${mixedCount} group${mixedCount === 1 ? "" : "s"} found` : ""}.
+              True different names stay separate so you can merge them yourself.
+              On Job Orders, vendor company is the <strong>Send To</strong> tab.
             </p>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
@@ -222,7 +239,7 @@ export default function RenameFieldNames({
                 <div style={groupHead}>
                   <span style={{ fontSize: 12, color: "var(--text-3)" }}>
                     {group.mixed
-                      ? `Same name, different capitals/spaces · ${group.items.length} spellings · ${group.total} challans`
+                      ? `Likely same name · ${group.items.length} spellings · ${group.total} challans`
                       : group.total === 1
                       ? "1 challan uses this exact name"
                       : `${group.total} challans use this exact name`}

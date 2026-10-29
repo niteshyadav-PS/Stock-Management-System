@@ -101,3 +101,65 @@ export function vendorNamesForJobType(jobType) {
 export function jobTypeLabel(jobType) {
   return jobType === "fabrication" ? "Fabrication" : "Powder Coating";
 }
+
+/** Powder-coating vendor material category (Aluminium / MS). */
+export const VENDOR_MATERIAL_CATEGORIES = [
+  { id: "aluminium", label: "Aluminium" },
+  { id: "ms", label: "MS" },
+];
+
+/**
+ * Match tokens per category — covers common spelling variants on challans
+ * (spaces, punctuation, short names like "C-Tech", "Fusion coating").
+ */
+const VENDOR_CATEGORY_MATCHERS = {
+  aluminium: [
+    "gkpowder",
+    "gkpodercoating",
+    "metacoat",
+    "harshan",
+    "rlpcoat",
+    "omdarshan",
+  ],
+  ms: [
+    "questenterprises",
+    "ctech",
+    "toros",
+    "zencometal",
+    "zenco",
+    "shreesai",
+    "fusionmetal",
+    "fusioncoating",
+  ],
+};
+
+function vendorMatchKey(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * Resolve Aluminium / MS for a vendor name. Returns "" when unknown.
+ * Longer / more specific tokens win (e.g. fusionmetal over shorter hits).
+ */
+export function vendorMaterialCategory(vendorName) {
+  const key = vendorMatchKey(vendorName);
+  if (!key) return "";
+
+  let best = { id: "", len: 0 };
+  for (const { id } of VENDOR_MATERIAL_CATEGORIES) {
+    for (const token of VENDOR_CATEGORY_MATCHERS[id] || []) {
+      if (!token || token.length < 3 || token.length < best.len) continue;
+      if (key.includes(token)) best = { id, len: token.length };
+    }
+  }
+  return best.id;
+}
+
+export function vendorMaterialCategoryLabel(vendorName) {
+  const id = vendorMaterialCategory(vendorName);
+  return VENDOR_MATERIAL_CATEGORIES.find((c) => c.id === id)?.label || "";
+}

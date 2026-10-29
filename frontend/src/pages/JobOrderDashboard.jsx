@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getJobOrders, unwrapList } from "../api/api";
+import {
+  VENDOR_MATERIAL_CATEGORIES,
+  vendorMaterialCategory,
+  vendorMaterialCategoryLabel,
+} from "../utils/jobOrderVendors";
 
 function num(v) {
   const n = Number(v);
@@ -29,6 +34,25 @@ function jobTypeLabel(type) {
 
 function jobTypeShort(type) {
   return type === "fabrication" ? "Fab" : "PC";
+}
+
+/** Case/whitespace key so "Fusion Metal" and "FUSION METAL" collapse in filters. */
+function vendorKey(name) {
+  return String(name || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function dedupeVendorNames(names) {
+  const map = new Map();
+  for (const raw of names || []) {
+    const display = String(raw || "").trim().replace(/\s+/g, " ");
+    if (!display || display === "—") continue;
+    const key = display.toLowerCase();
+    if (!map.has(key)) map.set(key, display);
+  }
+  return [...map.values()];
 }
 
 function isVendorAcknowledged(order) {
@@ -197,6 +221,7 @@ export default function JobOrderDashboard() {
   const [jobType, setJobType] = useState("all");
   const [activeKpi, setActiveKpi] = useState("total");
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [vendorFilter, setVendorFilter] = useState("all");
   const [panelKey, setPanelKey] = useState(0);
 
@@ -229,19 +254,34 @@ export default function JobOrderDashboard() {
     return out;
   }, [orders]);
 
-  const vendors = useMemo(() => {
-    const set = new Set();
-    for (const line of lines) {
-      if (line.vendorName && line.vendorName !== "—") set.add(line.vendorName);
-    }
-    return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  }, [lines]);
+  const categoryScopedLines = useMemo(() => {
+    if (categoryFilter === "all") return lines;
+    return lines.filter(
+      (l) => vendorMaterialCategory(l.vendorName) === categoryFilter,
+    );
+  }, [lines, categoryFilter]);
 
-  // Scope used for card counts — same vendor filter as the table (not search).
+  const vendors = useMemo(() => {
+    const names = categoryScopedLines.map((line) => line.vendorName).filter(Boolean);
+    return dedupeVendorNames(names).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [categoryScopedLines]);
+
+  // Drop vendor pick if it is outside the selected category.
+  useEffect(() => {
+    if (vendorFilter === "all") return;
+    if (!vendors.some((name) => vendorKey(name) === vendorKey(vendorFilter))) {
+      setVendorFilter("all");
+    }
+  }, [vendors, vendorFilter]);
+
+  // Scope used for card counts — same category + vendor filters as the table.
   const scopedLines = useMemo(() => {
-    if (vendorFilter === "all") return lines;
-    return lines.filter((l) => l.vendorName === vendorFilter);
-  }, [lines, vendorFilter]);
+    if (vendorFilter === "all") return categoryScopedLines;
+    const key = vendorKey(vendorFilter);
+    return categoryScopedLines.filter((l) => vendorKey(l.vendorName) === key);
+  }, [categoryScopedLines, vendorFilter]);
 
   const counts = useMemo(() => {
     const out = {};
@@ -269,6 +309,7 @@ export default function JobOrderDashboard() {
             l.process,
             l.srNo,
             l.vendorName,
+            vendorMaterialCategoryLabel(l.vendorName),
             l.vehicleNo,
             l.pipeline,
           ].join(" "),
@@ -644,12 +685,13 @@ export default function JobOrderDashboard() {
         .jod-pill.teal { background: #e6f2f0; color: #143e38; }
         /* Flexible middle columns fill the page; qty cols stay compact */
         .jod-table col.jod-c-challan { width: 7%; }
-        .jod-table col.jod-c-date { width: 8%; }
-        .jod-table col.jod-c-item { width: 16%; }
-        .jod-table col.jod-c-vendor { width: 16%; }
-        .jod-table col.jod-c-qty { width: 6%; }
-        .jod-table col.jod-c-pipe { width: 14%; }
-        .jod-table col.jod-c-store { width: 8%; }
+        .jod-table col.jod-c-date { width: 7%; }
+        .jod-table col.jod-c-item { width: 14%; }
+        .jod-table col.jod-c-vendor { width: 13%; }
+        .jod-table col.jod-c-cat { width: 7%; }
+        .jod-table col.jod-c-qty { width: 5.5%; }
+        .jod-table col.jod-c-pipe { width: 13%; }
+        .jod-table col.jod-c-store { width: 7%; }
         .jod-table col.jod-c-act { width: 7%; }
         @media (max-width: 1100px) {
           .jod-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -715,6 +757,23 @@ export default function JobOrderDashboard() {
             <option value="all">All types</option>
             <option value="powder_coating">Powder Coating</option>
             <option value="fabrication">Fabrication</option>
+          </select>
+        </div>
+        <div className="jod-field">
+          <label htmlFor="jod-category">Category</label>
+          <select
+            id="jod-category"
+            value={categoryFilter}
+            onChange={(e) => {
+              setCategoryFilter(e.target.value);
+              setVendorFilter("all");
+              setPanelKey((k) => k + 1);
+            }}
+          >
+            <option value="all">All categories</option>
+            {VENDOR_MATERIAL_CATEGORIES.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.label}</option>
+            ))}
           </select>
         </div>
         <div className="jod-field">
@@ -791,6 +850,7 @@ export default function JobOrderDashboard() {
                       <tr>
                         <th>Item</th>
                         <th>Vendor</th>
+                        <th>Category</th>
                         <th>Type</th>
                         <th className="num">Challans</th>
                         <th className="num">Order qty</th>
@@ -811,6 +871,9 @@ export default function JobOrderDashboard() {
                             <span className="jod-item">{row.description}</span>
                           </td>
                           <td className="jod-clip" title={row.vendorName}>{row.vendorName}</td>
+                          <td className="jod-clip">
+                            {vendorMaterialCategoryLabel(row.vendorName) || "—"}
+                          </td>
                           <td className="jod-clip" title={jobTypeLabel(row.jobType)}>
                             {jobTypeShort(row.jobType)}
                           </td>
@@ -864,6 +927,7 @@ export default function JobOrderDashboard() {
                   <col className="jod-c-date" />
                   <col className="jod-c-item" />
                   <col className="jod-c-vendor" />
+                  <col className="jod-c-cat" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
@@ -878,6 +942,7 @@ export default function JobOrderDashboard() {
                     <th>Date</th>
                     <th>Item</th>
                     <th>Vendor</th>
+                    <th>Category</th>
                     <th className="num">Order</th>
                     <th className="num">Ready</th>
                     <th className="num">Disp</th>
@@ -918,6 +983,9 @@ export default function JobOrderDashboard() {
                           <span className="jod-item">{line.description}</span>
                         </td>
                         <td className="jod-clip" title={line.vendorName}>{line.vendorName}</td>
+                        <td className="jod-clip">
+                          {vendorMaterialCategoryLabel(line.vendorName) || "—"}
+                        </td>
                         <td className="num">{formatQty(line.orderQty)}</td>
                         <td className="num">{formatQty(line.ready)}</td>
                         <td className="num">{line.dispatch ? formatQty(line.dispatch) : "—"}</td>

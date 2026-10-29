@@ -280,13 +280,18 @@ router.post(
         return res.status(400).json({ error: "Select fewer names at once." });
       }
 
-      // Match list scope; also rename trimmed equals of each selected spelling.
-      const fromPattern = from.flatMap((name) => {
-        const trimmed = String(name).trim();
-        return trimmed && trimmed !== name ? [name, trimmed] : [name];
-      });
+      // Case-insensitive exact match for each selected spelling (covers casing leftovers).
+      const nameMatchers = [
+        ...new Set(
+          from
+            .map((name) => String(name).trim().replace(/\s+/g, " "))
+            .filter(Boolean),
+        ),
+      ].map(
+        (name) => new RegExp(`^${escapeRegExp(name)}$`, "i"),
+      );
       const filter = mergeFilters(
-        { [field]: { $in: [...new Set(fromPattern)] } },
+        { $or: nameMatchers.map((re) => ({ [field]: re })) },
         jobTypeFilter(req.body.jobType),
       );
 
@@ -298,7 +303,10 @@ router.post(
       // Keep vendor logins linked when Send To (vendor company) is renamed.
       if (field === "vendorName") {
         const userResult = await User.updateMany(
-          { role: "vendor", vendorName: { $in: [...new Set(fromPattern)] } },
+          {
+            role: "vendor",
+            $or: nameMatchers.map((re) => ({ vendorName: re })),
+          },
           { $set: { vendorName: to } },
         );
         usersUpdated = userResult.modifiedCount || 0;
@@ -806,6 +814,8 @@ router.delete(
 
 // ── PATCH /api/job-orders/:id/vendor-ack ──────────────────────────────────────
 // Vendor confirms materials arrived and sets the expected ready date.
+// Optional body.items[]: { itemIndex, qty } — correct order qty when physical
+// receive qty does not match the challan (only allowed before QC lots exist).
 router.patch("/:id/vendor-ack", authMiddleware, async (req, res) => {
   try {
     const role = req.user?.role;
@@ -830,6 +840,41 @@ router.patch("/:id/vendor-ack", authMiddleware, async (req, res) => {
 
     const who = req.user.name || req.user.username;
     const note = String(req.body?.note || "").trim();
+    const qtyChanges = [];
+
+    const itemUpdates = Array.isArray(req.body?.items) ? req.body.items : [];
+    for (const entry of itemUpdates) {
+      const itemIndex = Number(entry?.itemIndex);
+      if (!Number.isInteger(itemIndex) || itemIndex < 0 || itemIndex >= order.items.length) {
+        return res.status(400).json({ error: "Invalid item index in receive qty update." });
+      }
+      const item = order.items[itemIndex];
+      if ((item.qcRounds || []).length > 0) {
+        return res.status(400).json({
+          error: `"${item.description || "Item"}": cannot change qty after QC lots exist.`,
+        });
+      }
+      if (num(item.receivedQty) > 0.0001) {
+        return res.status(400).json({
+          error: `"${item.description || "Item"}": cannot change qty after store has received material.`,
+        });
+      }
+      const nextQty = Number(entry?.qty);
+      if (!Number.isFinite(nextQty) || nextQty <= 0) {
+        return res.status(400).json({
+          error: `"${item.description || "Item"}": received qty must be greater than 0.`,
+        });
+      }
+      const prevQty = num(item.qty);
+      const rounded = Math.round(nextQty * 1000) / 1000;
+      if (Math.abs(rounded - prevQty) > 0.0001) {
+        item.qty = rounded;
+        qtyChanges.push(
+          `${item.description || `Item ${itemIndex + 1}`}: ${prevQty} → ${rounded}`,
+        );
+      }
+    }
+
     order.vendorExpectedDate = expectedDate;
     order.vendorAckBy = who;
     order.vendorAckAt = new Date();
@@ -839,6 +884,9 @@ router.patch("/:id/vendor-ack", authMiddleware, async (req, res) => {
       by: who,
       note:
         `Vendor received challan. Expected date: ${expectedDate.split("-").reverse().join("/")}` +
+        (qtyChanges.length
+          ? ` — Qty updated: ${qtyChanges.join("; ")}`
+          : "") +
         (note ? ` — ${note}` : ""),
       at: new Date(),
     });

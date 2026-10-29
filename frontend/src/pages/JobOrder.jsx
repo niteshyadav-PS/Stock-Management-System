@@ -16,7 +16,7 @@ import { vendorsForJobType } from "../utils/jobOrderVendors";
 
 const JO_RENAME_FIELDS = [
   { key: "sendFromName", label: "Send From" },
-  { key: "vendorName", label: "Send To" },
+  { key: "vendorName", label: "Send To (Vendor)" },
   { key: "issuedBy", label: "Issued By" },
 ];
 

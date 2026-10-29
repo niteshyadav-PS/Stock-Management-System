@@ -182,6 +182,7 @@ export default function VendorDashboard() {
   const [ackNote, setAckNote] = useState("");
   const [ackSaving, setAckSaving] = useState(false);
   const [ackErr, setAckErr] = useState("");
+  const [ackQtyInputs, setAckQtyInputs] = useState([]);
 
   const jobType =
     user?.vendorJobType === "fabrication" ? "fabrication" : "powder_coating";
@@ -270,7 +271,17 @@ export default function VendorDashboard() {
     setAckExpectedDate(todayStr());
     setAckNote("");
     setAckErr("");
+    setAckQtyInputs(
+      (order.items || []).map((it) => {
+        const q = Number(it.qty);
+        return Number.isFinite(q) && q > 0 ? String(q) : "";
+      }),
+    );
     setMsg({ text: "", ok: true });
+  }
+
+  function setAckQty(i, raw) {
+    setAckQtyInputs((list) => list.map((v, idx) => (idx === i ? raw : v)));
   }
 
   function goToJobOrder(order, { receive = false } = {}) {
@@ -293,17 +304,41 @@ export default function VendorDashboard() {
       setAckErr("Expected date is compulsory.");
       return;
     }
+
+    const items = [];
+    for (let i = 0; i < (ackOrder.items || []).length; i++) {
+      const it = ackOrder.items[i];
+      const ordered = Number(it.qty) || 0;
+      const raw = String(ackQtyInputs[i] ?? "").trim();
+      if (raw === "") {
+        setAckErr(`Enter received qty for "${it.description || `Item ${i + 1}`}".`);
+        return;
+      }
+      const receivedQty = Number(raw);
+      if (!Number.isFinite(receivedQty) || receivedQty <= 0) {
+        setAckErr(`Received qty for "${it.description || `Item ${i + 1}`}" must be greater than 0.`);
+        return;
+      }
+      if (Math.abs(receivedQty - ordered) > 0.0001) {
+        items.push({ itemIndex: i, qty: Math.round(receivedQty * 1000) / 1000 });
+      }
+    }
+
     setAckSaving(true);
     try {
       await acknowledgeJobOrder(ackOrder._id, {
         expectedDate: ackExpectedDate,
         note: ackNote,
+        ...(items.length ? { items } : {}),
       });
       setMsg({
-        text: `Challan ${ackOrder.srNo} received. Expected date saved.`,
+        text: items.length
+          ? `Challan ${ackOrder.srNo} received. Qty updated on ${items.length} item${items.length === 1 ? "" : "s"}.`
+          : `Challan ${ackOrder.srNo} received. Expected date saved.`,
         ok: true,
       });
       setAckOrder(null);
+      setAckQtyInputs([]);
       await load();
       setActive("received");
       setPanelKey((k) => k + 1);
@@ -819,7 +854,7 @@ export default function VendorDashboard() {
                     Receive {jobTypeLabel(jobType)} challan {ackOrder.srNo}
                   </h3>
                   <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "var(--text-2)" }}>
-                    Confirm materials received and set the expected ready date.
+                    Confirm materials received. Edit Received qty only if it differs from the challan qty.
                   </p>
                 </div>
                 <button
@@ -827,7 +862,10 @@ export default function VendorDashboard() {
                   className="btn btn-ghost btn-sm"
                   aria-label="Close"
                   disabled={ackSaving}
-                  onClick={() => setAckOrder(null)}
+                  onClick={() => {
+                    setAckOrder(null);
+                    setAckQtyInputs([]);
+                  }}
                 >
                   ✕
                 </button>
@@ -858,25 +896,57 @@ export default function VendorDashboard() {
                       <tr>
                         <th>Sr</th>
                         <th>Item</th>
-                        <th>Qty</th>
+                        <th>Order qty</th>
+                        <th>Received qty</th>
                         <th>UOM</th>
                         <th>Process / RAL</th>
                         <th>Project</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(ackOrder.items || []).map((it, idx) => (
-                        <tr key={idx}>
-                          <td>{idx + 1}</td>
-                          <td>
-                            <strong>{it.description || "—"}</strong>
-                          </td>
-                          <td>{formatQty(it.qty)}</td>
-                          <td>{it.unit || "NOS"}</td>
-                          <td>{it.process || "—"}</td>
-                          <td>{it.projectName || "—"}</td>
-                        </tr>
-                      ))}
+                      {(ackOrder.items || []).map((it, idx) => {
+                        const ordered = Number(it.qty) || 0;
+                        const raw = ackQtyInputs[idx] ?? "";
+                        const recv = Number(raw);
+                        const changed =
+                          raw !== "" &&
+                          Number.isFinite(recv) &&
+                          Math.abs(recv - ordered) > 0.0001;
+                        return (
+                          <tr key={idx}>
+                            <td>{idx + 1}</td>
+                            <td>
+                              <strong>{it.description || "—"}</strong>
+                            </td>
+                            <td>{formatQty(it.qty)}</td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0.001"
+                                step="any"
+                                value={raw}
+                                onChange={(e) => setAckQty(idx, e.target.value)}
+                                style={{
+                                  width: 88,
+                                  height: 32,
+                                  padding: "0 8px",
+                                  border: `1.5px solid ${changed ? "var(--teal)" : "var(--line)"}`,
+                                  borderRadius: 6,
+                                  textAlign: "right",
+                                  background: changed ? "#f3faf8" : "#fff",
+                                  font: "inherit",
+                                  fontSize: 13,
+                                }}
+                                title="Change only if received qty differs from order qty"
+                                aria-label={`Received qty for ${it.description || `item ${idx + 1}`}`}
+                              />
+                            </td>
+                            <td>{it.unit || "NOS"}</td>
+                            <td>{it.process || "—"}</td>
+                            <td>{it.projectName || "—"}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

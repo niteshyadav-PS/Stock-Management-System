@@ -157,6 +157,8 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
   const [ackNote, setAckNote] = useState("");
   const [ackSaving, setAckSaving] = useState(false);
   const [ackErr, setAckErr] = useState("");
+  // Optional per-item received qty (defaults to challan qty). Edit only if mismatch.
+  const [ackQtyInputs, setAckQtyInputs] = useState([]);
   // QC dialogs: check one item | skip one item | check all pending on a challan
   const [qcDialog, setQcDialog] = useState(null); // { type, orderId, itemIndex? }
   const [qcDialogErr, setQcDialogErr] = useState("");
@@ -352,6 +354,23 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     return (order?.items || []).filter((item) => pendingRounds(item).length > 0).length;
   }
 
+  function openVendorAck(order) {
+    setAckOrder(order);
+    setAckExpectedDate(todayStr());
+    setAckNote("");
+    setAckErr("");
+    setAckQtyInputs(
+      (order.items || []).map((it) => {
+        const q = Number(it.qty);
+        return Number.isFinite(q) && q > 0 ? String(q) : "";
+      }),
+    );
+  }
+
+  function setAckQty(i, raw) {
+    setAckQtyInputs((list) => list.map((v, idx) => (idx === i ? raw : v)));
+  }
+
   async function submitVendorAck(e) {
     e?.preventDefault?.();
     if (!ackOrder) return;
@@ -360,14 +379,41 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       setAckErr("Expected date is compulsory.");
       return;
     }
+
+    const items = [];
+    for (let i = 0; i < (ackOrder.items || []).length; i++) {
+      const it = ackOrder.items[i];
+      const ordered = Number(it.qty) || 0;
+      const raw = String(ackQtyInputs[i] ?? "").trim();
+      if (raw === "") {
+        setAckErr(`Enter received qty for "${it.description || `Item ${i + 1}`}".`);
+        return;
+      }
+      const receivedQty = Number(raw);
+      if (!Number.isFinite(receivedQty) || receivedQty <= 0) {
+        setAckErr(`Received qty for "${it.description || `Item ${i + 1}`}" must be greater than 0.`);
+        return;
+      }
+      if (Math.abs(receivedQty - ordered) > 0.0001) {
+        items.push({ itemIndex: i, qty: Math.round(receivedQty * 1000) / 1000 });
+      }
+    }
+
     setAckSaving(true);
     try {
       await acknowledgeJobOrder(ackOrder._id, {
         expectedDate: ackExpectedDate,
         note: ackNote,
+        ...(items.length ? { items } : {}),
       });
-      setMsg({ text: `Challan ${ackOrder.srNo} received. Expected date saved.`, ok: true });
+      setMsg({
+        text: items.length
+          ? `Challan ${ackOrder.srNo} received. Qty updated on ${items.length} item${items.length === 1 ? "" : "s"}.`
+          : `Challan ${ackOrder.srNo} received. Expected date saved.`,
+        ok: true,
+      });
       setAckOrder(null);
+      setAckQtyInputs([]);
       await load();
       if (onUpdated) onUpdated();
     } catch (err) {
@@ -394,23 +440,33 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
   }, [orders]);
 
   const vendorOptions = useMemo(() => {
-    const names = new Set();
+    const names = [];
     // Preset companies for this page type so QC always sees the Vendor filter.
     const presetType =
       lockedJobType
       || (typeFilter !== "all" ? typeFilter : null);
     if (presetType === "powder_coating" || presetType === "fabrication") {
-      for (const name of vendorNamesForJobType(presetType)) names.add(name);
+      names.push(...vendorNamesForJobType(presetType));
     } else {
-      for (const name of vendorNamesForJobType("powder_coating")) names.add(name);
-      for (const name of vendorNamesForJobType("fabrication")) names.add(name);
+      names.push(...vendorNamesForJobType("powder_coating"));
+      names.push(...vendorNamesForJobType("fabrication"));
     }
     for (const order of orders) {
       if (lockedJobType && orderJobType(order) !== lockedJobType) continue;
       const name = String(order.vendorName || "").trim();
-      if (name) names.add(name);
+      if (name) names.push(name);
     }
-    return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    // Collapse casing/spacing variants (e.g. "FUSION METAL…" vs "Fusion Metal…").
+    const map = new Map();
+    for (const raw of names) {
+      const display = String(raw || "").trim().replace(/\s+/g, " ");
+      if (!display) continue;
+      const key = display.toLowerCase();
+      if (!map.has(key)) map.set(key, display);
+    }
+    return [...map.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
   }, [orders, lockedJobType, typeFilter]);
 
   useEffect(() => {
@@ -516,10 +572,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     pendingFocusIdRef.current = orderId;
     setOpenChallans((prev) => ({ ...prev, [orderId]: true }));
     if (openReceive && isVendor && !isVendorAcknowledged(target)) {
-      setAckOrder(target);
-      setAckExpectedDate(todayStr());
-      setAckNote("");
-      setAckErr("");
+      openVendorAck(target);
     }
     const targetPage = Math.floor(idx / pageSize) + 1;
     if (page !== targetPage) setPage(targetPage);
@@ -959,10 +1012,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            setAckOrder(row.order);
-            setAckExpectedDate(todayStr());
-            setAckNote("");
-            setAckErr("");
+            openVendorAck(row.order);
           }}
         >
           Receive challan
@@ -1990,13 +2040,36 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           font-size: 12.5px;
           table-layout: fixed;
         }
-        .vq-ack-items col.vq-ack-sr { width: 40px; }
-        .vq-ack-items col.vq-ack-item { width: 22%; }
+        .vq-ack-items col.vq-ack-sr { width: 36px; }
+        .vq-ack-items col.vq-ack-item { width: 20%; }
         .vq-ack-items col.vq-ack-qty { width: 70px; }
-        .vq-ack-items col.vq-ack-uom { width: 56px; }
-        .vq-ack-items col.vq-ack-process { width: 18%; }
-        .vq-ack-items col.vq-ack-project { width: 14%; }
-        .vq-ack-items col.vq-ack-remark { width: 16%; }
+        .vq-ack-items col.vq-ack-recv { width: 100px; }
+        .vq-ack-items col.vq-ack-uom { width: 52px; }
+        .vq-ack-items col.vq-ack-process { width: 16%; }
+        .vq-ack-items col.vq-ack-project { width: 12%; }
+        .vq-ack-items col.vq-ack-remark { width: 14%; }
+        .vq-ack-items input.vq-ack-qty-input {
+          width: 100%;
+          max-width: 88px;
+          height: 32px;
+          padding: 0 8px;
+          border: 1.5px solid var(--line);
+          border-radius: 6px;
+          font: inherit;
+          font-size: 13px;
+          text-align: right;
+          box-sizing: border-box;
+        }
+        .vq-ack-items input.vq-ack-qty-input.is-changed {
+          border-color: var(--teal);
+          background: #f3faf8;
+        }
+        .vq-ack-qty-hint {
+          margin: 0 0 10px;
+          font-size: 12px;
+          color: var(--text-2);
+          line-height: 1.4;
+        }
         .vq-ack-items th {
           text-align: left;
           font-size: 10px;
@@ -2379,12 +2452,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                         <button
                           type="button"
                           className="btn btn-in btn-sm"
-                          onClick={() => {
-                            setAckOrder(order);
-                            setAckExpectedDate(todayStr());
-                            setAckNote("");
-                            setAckErr("");
-                          }}
+                          onClick={() => openVendorAck(order)}
                         >
                           Receive
                         </button>
@@ -3467,10 +3535,10 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
               <div>
                 <h3>Receive {jobTypeLabel(orderJobType(ackOrder))} challan {ackOrder.srNo}</h3>
                 <div className="vq-muted" style={{ marginTop: 4 }}>
-                  Confirm the materials received and enter the expected ready date.
+                  Confirm materials received. Change Received qty only if it does not match the challan qty.
                 </div>
               </div>
-              <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setAckOrder(null)}>✕</button>
+              <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setAckOrder(null); setAckQtyInputs([]); }}>✕</button>
             </div>
             <form className="vq-modal-body" onSubmit={submitVendorAck}>
               <div className="vq-modal-meta">
@@ -3481,12 +3549,16 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
               </div>
               <div className="vq-ack-items">
                 <div className="vq-ack-items-head">Items you are receiving</div>
+                <p className="vq-ack-qty-hint">
+                  Received qty defaults to challan qty. Edit it only when physical qty is different — the job order qty will be updated.
+                </p>
                 <div className="vq-ack-items-scroll">
                   <table>
                     <colgroup>
                       <col className="vq-ack-sr" />
                       <col className="vq-ack-item" />
                       <col className="vq-ack-qty" />
+                      <col className="vq-ack-recv" />
                       <col className="vq-ack-uom" />
                       <col className="vq-ack-process" />
                       <col className="vq-ack-project" />
@@ -3496,7 +3568,8 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                       <tr>
                         <th>Sr</th>
                         <th>Item</th>
-                        <th className="num">Qty</th>
+                        <th className="num">Order qty</th>
+                        <th className="num">Received qty</th>
                         <th>UOM</th>
                         <th>Process / RAL</th>
                         <th>Project</th>
@@ -3504,17 +3577,38 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                       </tr>
                     </thead>
                     <tbody>
-                      {(ackOrder.items || []).map((it, idx) => (
-                        <tr key={idx}>
-                          <td>{idx + 1}</td>
-                          <td><strong>{it.description || "—"}</strong></td>
-                          <td className="num">{formatQty(it.qty)}</td>
-                          <td>{it.unit || "NOS"}</td>
-                          <td>{it.process || "—"}</td>
-                          <td>{it.projectName || "—"}</td>
-                          <td>{it.remark || "—"}</td>
-                        </tr>
-                      ))}
+                      {(ackOrder.items || []).map((it, idx) => {
+                        const ordered = Number(it.qty) || 0;
+                        const raw = ackQtyInputs[idx] ?? "";
+                        const recv = Number(raw);
+                        const changed =
+                          raw !== "" &&
+                          Number.isFinite(recv) &&
+                          Math.abs(recv - ordered) > 0.0001;
+                        return (
+                          <tr key={idx}>
+                            <td>{idx + 1}</td>
+                            <td><strong>{it.description || "—"}</strong></td>
+                            <td className="num">{formatQty(it.qty)}</td>
+                            <td className="num">
+                              <input
+                                type="number"
+                                min="0.001"
+                                step="any"
+                                className={`vq-ack-qty-input${changed ? " is-changed" : ""}`}
+                                value={raw}
+                                onChange={(e) => setAckQty(idx, e.target.value)}
+                                title="Change only if received qty differs from order qty"
+                                aria-label={`Received qty for ${it.description || `item ${idx + 1}`}`}
+                              />
+                            </td>
+                            <td>{it.unit || "NOS"}</td>
+                            <td>{it.process || "—"}</td>
+                            <td>{it.projectName || "—"}</td>
+                            <td>{it.remark || "—"}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
