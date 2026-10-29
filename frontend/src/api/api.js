@@ -181,6 +181,8 @@ export const getPurchaseOrderActivity = (id) => client.get(`/purchase-orders/${i
 export const getJobOrders = (params) =>
   client.get(withQuery("/job-orders", params || {}));
 
+export const getJobOrder = (id) => client.get(`/job-orders/${id}`);
+
 export const getJobOrderNameValues = (field, params = {}) =>
   client.get(withQuery("/job-orders/name-values", { field, ...params }));
 

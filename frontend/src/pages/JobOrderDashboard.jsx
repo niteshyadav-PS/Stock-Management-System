@@ -1,11 +1,41 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getJobOrders, unwrapList } from "../api/api";
+import { ThFilter } from "../components/ColFilter";
+import { JobOrderViewModal } from "./JobOrder";
 import {
   VENDOR_MATERIAL_CATEGORIES,
   vendorMaterialCategory,
   vendorMaterialCategoryLabel,
 } from "../utils/jobOrderVendors";
+
+const EMPTY_COL_FILTERS = {
+  challan: [],
+  dcDate: [],
+  vendor: [],
+  category: [],
+  expected: [],
+  delivery: [],
+  delay: [],
+  orderQty: [],
+  ready: [],
+  dispatch: [],
+  received: [],
+  pipeline: [],
+};
+
+function filterNameKey(v) {
+  return String(v || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function matchesColFilter(selected, value) {
+  if (!selected?.length) return true;
+  const key = filterNameKey(value);
+  return selected.some((s) => filterNameKey(s) === key);
+}
 
 function num(v) {
   const n = Number(v);
@@ -26,6 +56,45 @@ function formatDate(d) {
   const [y, m, day] = String(d).slice(0, 10).split("-");
   if (!y || !m || !day) return String(d);
   return `${day}/${m}/${y}`;
+}
+
+function parseYmd(value) {
+  const raw = String(value || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [y, m, d] = raw.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function receiptReceivedDate(receipt) {
+  if (receipt?.receivedDate) return String(receipt.receivedDate).slice(0, 10);
+  if (receipt?.at) return String(receipt.at).slice(0, 10);
+  return "";
+}
+
+/** Latest material receive date on this item line (yyyy-mm-dd). */
+function itemDeliveryDate(item) {
+  let best = "";
+  for (const receipt of item?.receipts || []) {
+    const day = receiptReceivedDate(receipt);
+    if (day && (!best || day > best)) best = day;
+  }
+  return best;
+}
+
+/** Delivery − expected in whole days. Positive = late. */
+function calcDelayDays(expectedDate, deliveryDate) {
+  const expected = parseYmd(expectedDate);
+  const delivery = parseYmd(deliveryDate);
+  if (!expected || !delivery) return null;
+  return Math.round((delivery - expected) / 86400000);
+}
+
+function delayDaysLabel(days) {
+  if (days == null || !Number.isFinite(days)) return "—";
+  if (days === 0) return "On time";
+  if (days > 0) return `${days}d late`;
+  return `${Math.abs(days)}d early`;
 }
 
 function jobTypeLabel(type) {
@@ -154,15 +223,26 @@ function lineMetrics(order, item, itemIndex) {
   const scrap = scrapQty(item);
   const received = num(item?.receivedQty);
   const receivable = receivableNow(item);
+  const expectedDate = String(order.vendorExpectedDate || "").trim().slice(0, 10);
+  const deliveryDate = itemDeliveryDate(item);
+  const delayDays = calcDelayDays(expectedDate, deliveryDate);
+  const categoryLabel = vendorMaterialCategoryLabel(order.vendorName) || "—";
   return {
     key: `${order._id}-${itemIndex}`,
     orderId: order._id,
     srNo: order.srNo,
     date: order.date,
+    dcDateLabel: formatDate(order.date),
     jobType: order.jobType === "fabrication" ? "fabrication" : "powder_coating",
     vendorName: String(order.vendorName || "").trim() || "—",
+    categoryLabel,
     vehicleNo: order.vehicleNo || "",
-    expectedDate: order.vendorExpectedDate || "",
+    expectedDate,
+    expectedLabel: expectedDate ? formatDate(expectedDate) : "—",
+    deliveryDate,
+    deliveryLabel: deliveryDate ? formatDate(deliveryDate) : "—",
+    delayDays,
+    delayLabel: delayDaysLabel(delayDays),
     acknowledged: isVendorAcknowledged(order),
     receiveStatus: receiveStatus(order),
     orderStatus: order.status || "issued",
@@ -183,34 +263,113 @@ function lineMetrics(order, item, itemIndex) {
   };
 }
 
+function isFullyDelivered(line) {
+  return (
+    line.orderStatus === "received"
+    || (line.orderQty > 0 && line.received >= line.orderQty - 0.001)
+  );
+}
+
+function isPartialDelivered(line) {
+  if (isFullyDelivered(line)) return false;
+  return (
+    line.orderStatus === "partial"
+    || (line.received > 0.001 && line.balance > 0.001)
+  );
+}
+
 function lineMatchesKpi(line, kpiId) {
   if (kpiId === "total") return true;
-  if (kpiId === "awaiting_ack") return !line.acknowledged;
+  // Vendor has not confirmed / received the challan yet.
+  if (kpiId === "waiting_vendor") {
+    return !line.acknowledged && !isFullyDelivered(line);
+  }
+  // Vendor received it; work ongoing (nothing waiting at QC / ready to take / rework).
+  if (kpiId === "in_process") {
+    return (
+      line.acknowledged
+      && !isFullyDelivered(line)
+      && line.received <= 0.001
+      && line.pending <= 0.001
+      && line.receivable <= 0.001
+      && line.rework <= 0.001
+    );
+  }
   if (kpiId === "pending_qc") return line.pending > 0.001;
+  // QC-approved qty ready for factory/site to receive.
+  if (kpiId === "ready_dispatch") return line.receivable > 0.001;
+  if (kpiId === "partial") return isPartialDelivered(line);
+  if (kpiId === "completed") return isFullyDelivered(line);
   if (kpiId === "rework") return line.rework > 0.001;
   if (kpiId === "rejected") return line.scrap > 0.001;
-  if (kpiId === "ready_dispatch") return line.dispatch > 0.001;
-  if (kpiId === "receivable") return line.receivable > 0.001;
-  if (kpiId === "partial") {
-    return line.orderStatus === "partial" || (line.received > 0.001 && line.balance > 0.001);
-  }
-  if (kpiId === "completed") {
-    return line.orderStatus === "received" || (line.orderQty > 0 && line.received >= line.orderQty - 0.001);
-  }
   return true;
 }
 
 // Card value: "challans" = distinct challans, "lines" = matching item rows (same as table).
 const KPI_CARDS = [
-  { id: "total", label: "Total challans", tone: "ink", hint: "All loaded job orders", countBy: "challans" },
-  { id: "awaiting_ack", label: "Awaiting vendor", tone: "rust", hint: "Not yet received by vendor", countBy: "challans" },
-  { id: "pending_qc", label: "Pending QC", tone: "amber", hint: "Item lots waiting with QC", countBy: "lines" },
-  { id: "rework", label: "Rework open", tone: "rust", hint: "Items sent back for rework", countBy: "lines" },
-  { id: "rejected", label: "Rejected", tone: "rust", hint: "Items permanently rejected", countBy: "lines" },
-  { id: "ready_dispatch", label: "Ready to dispatch", tone: "teal", hint: "Items with QC-approved qty", countBy: "lines" },
-  { id: "receivable", label: "Can receive", tone: "teal", hint: "Items store can take now", countBy: "lines" },
-  { id: "partial", label: "Partial receive", tone: "amber", hint: "Partially received at store", countBy: "challans" },
-  { id: "completed", label: "Fully received", tone: "ink", hint: "All qty received at store", countBy: "challans" },
+  {
+    id: "total",
+    label: "Total Challan",
+    tone: "ink",
+    hint: "All job order challans",
+    countBy: "challans",
+  },
+  {
+    id: "waiting_vendor",
+    label: "Waiting for Vendor Confirmation",
+    tone: "rust",
+    hint: "Pending vendor receive",
+    countBy: "challans",
+  },
+  {
+    id: "in_process",
+    label: "In Process",
+    tone: "amber",
+    hint: "Vendor has received the job order",
+    countBy: "challans",
+  },
+  {
+    id: "pending_qc",
+    label: "Pending QC",
+    tone: "amber",
+    hint: "Pending on QC",
+    countBy: "lines",
+  },
+  {
+    id: "ready_dispatch",
+    label: "Ready to Dispatch",
+    tone: "teal",
+    hint: "Ready material available to receive",
+    countBy: "lines",
+  },
+  {
+    id: "partial",
+    label: "Partial Delivered at Factory/Site",
+    tone: "amber",
+    hint: "Partially received material",
+    countBy: "challans",
+  },
+  {
+    id: "completed",
+    label: "Fully Delivered at Factory/Site",
+    tone: "ink",
+    hint: "Fully received material",
+    countBy: "challans",
+  },
+  {
+    id: "rework",
+    label: "Rework",
+    tone: "rust",
+    hint: "Items sent back for rework",
+    countBy: "lines",
+  },
+  {
+    id: "rejected",
+    label: "Reject",
+    tone: "rust",
+    hint: "Permanently rejected qty",
+    countBy: "lines",
+  },
 ];
 
 export default function JobOrderDashboard() {
@@ -223,7 +382,9 @@ export default function JobOrderDashboard() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [vendorFilter, setVendorFilter] = useState("all");
+  const [colFilters, setColFilters] = useState(EMPTY_COL_FILTERS);
   const [panelKey, setPanelKey] = useState(0);
+  const [viewOrder, setViewOrder] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -276,7 +437,7 @@ export default function JobOrderDashboard() {
     }
   }, [vendors, vendorFilter]);
 
-  // Scope used for card counts — same category + vendor filters as the table.
+  // Cards + table share this scope (job type from API load, then category + vendor).
   const scopedLines = useMemo(() => {
     if (vendorFilter === "all") return categoryScopedLines;
     const key = vendorKey(vendorFilter);
@@ -294,7 +455,20 @@ export default function JobOrderDashboard() {
       }
     }
     return out;
-  }, [scopedLines]);
+  }, [scopedLines, categoryFilter, vendorFilter]);
+
+  const filterScopeLabel = useMemo(() => {
+    const parts = [];
+    if (jobType !== "all") {
+      parts.push(jobType === "fabrication" ? "Fabrication" : "Powder Coating");
+    }
+    if (categoryFilter !== "all") {
+      const cat = VENDOR_MATERIAL_CATEGORIES.find((c) => c.id === categoryFilter);
+      parts.push(cat?.label || categoryFilter);
+    }
+    if (vendorFilter !== "all") parts.push(vendorFilter);
+    return parts.length ? parts.join(" · ") : "";
+  }, [jobType, categoryFilter, vendorFilter]);
 
   const q = normalize(search);
 
@@ -309,7 +483,11 @@ export default function JobOrderDashboard() {
             l.process,
             l.srNo,
             l.vendorName,
-            vendorMaterialCategoryLabel(l.vendorName),
+            l.categoryLabel,
+            l.dcDateLabel,
+            l.expectedLabel,
+            l.deliveryLabel,
+            l.delayLabel,
             l.vehicleNo,
             l.pipeline,
           ].join(" "),
@@ -320,8 +498,67 @@ export default function JobOrderDashboard() {
     if (activeKpi !== "total") {
       list = list.filter((l) => lineMatchesKpi(l, activeKpi));
     }
+    if (colFilters.challan.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.challan, l.srNo));
+    }
+    if (colFilters.dcDate.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.dcDate, l.dcDateLabel));
+    }
+    if (colFilters.vendor.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.vendor, l.vendorName));
+    }
+    if (colFilters.category.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.category, l.categoryLabel));
+    }
+    if (colFilters.expected.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.expected, l.expectedLabel));
+    }
+    if (colFilters.delivery.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.delivery, l.deliveryLabel));
+    }
+    if (colFilters.delay.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.delay, l.delayLabel));
+    }
+    if (colFilters.orderQty.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.orderQty, formatQty(l.orderQty)));
+    }
+    if (colFilters.ready.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.ready, formatQty(l.ready)));
+    }
+    if (colFilters.dispatch.length) {
+      list = list.filter((l) =>
+        matchesColFilter(colFilters.dispatch, l.dispatch ? formatQty(l.dispatch) : "—"),
+      );
+    }
+    if (colFilters.received.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.received, formatQty(l.received)));
+    }
+    if (colFilters.pipeline.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.pipeline, l.pipeline));
+    }
     return list;
-  }, [scopedLines, q, activeKpi]);
+  }, [scopedLines, q, activeKpi, colFilters]);
+
+  const colOpts = useMemo(() => {
+    const base = scopedLines.filter((l) => {
+      if (activeKpi !== "total" && !lineMatchesKpi(l, activeKpi)) return false;
+      return true;
+    });
+    return {
+      challan: base.map((l) => l.srNo),
+      dcDate: base.map((l) => l.dcDateLabel),
+      vendor: base.map((l) => l.vendorName),
+      category: base.map((l) => l.categoryLabel),
+      expected: base.map((l) => l.expectedLabel),
+      delivery: base.map((l) => l.deliveryLabel),
+      delay: base.map((l) => l.delayLabel),
+      orderQty: base.map((l) => formatQty(l.orderQty)),
+      ready: base.map((l) => formatQty(l.ready)),
+      dispatch: base.map((l) => (l.dispatch ? formatQty(l.dispatch) : "—")),
+      received: base.map((l) => formatQty(l.received)),
+      pipeline: base.map((l) => l.pipeline),
+    };
+  }, [scopedLines, activeKpi]);
 
   const filteredChallanCount = useMemo(
     () => new Set(filteredLines.map((l) => l.orderId)).size,
@@ -414,13 +651,25 @@ export default function JobOrderDashboard() {
   }
 
   function openOrder(line) {
-    const path =
-      line.jobType === "fabrication" ? "/job-orders/fabrication" : "/job-orders";
-    navigate(path, { state: { focusChallan: line.srNo } });
+    const found = orders.find((o) => String(o._id) === String(line.orderId));
+    if (found) {
+      setViewOrder(found);
+      return;
+    }
+    setViewOrder({
+      _id: line.orderId,
+      srNo: line.srNo,
+      date: line.date,
+      jobType: line.jobType,
+      vendorName: line.vendorName,
+      vendorExpectedDate: line.expectedDate,
+      status: line.orderStatus,
+      items: [],
+    });
   }
 
   const activeLabel =
-    KPI_CARDS.find((c) => c.id === activeKpi)?.label || "Total challans";
+    KPI_CARDS.find((c) => c.id === activeKpi)?.label || "Total Challan";
 
   return (
     <div className="jod">
@@ -442,38 +691,69 @@ export default function JobOrderDashboard() {
           align-items: center;
         }
         .jod-toolbar {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-          margin-bottom: 16px;
+          display: grid;
+          grid-template-columns: minmax(220px, 1.6fr) repeat(3, minmax(150px, 0.85fr));
+          gap: 12px 14px;
           align-items: end;
           width: 100%;
+          margin-bottom: 16px;
+          padding: 14px 16px;
+          box-sizing: border-box;
+          background: #fff;
+          border: 1px solid var(--line);
+          border-radius: 12px;
+          box-shadow: 0 1px 2px rgba(28, 26, 22, 0.03);
         }
         .jod-field {
           display: flex;
           flex-direction: column;
-          gap: 5px;
-          min-width: 160px;
+          gap: 6px;
+          min-width: 0;
+          width: 100%;
         }
-        .jod-field.grow { flex: 1; min-width: 220px; }
+        .jod-field.grow { min-width: 0; }
         .jod-field label {
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 700;
-          letter-spacing: 0.04em;
+          letter-spacing: 0.05em;
           text-transform: uppercase;
           color: #8a8270;
+          line-height: 1.2;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .jod-field input,
         .jod-field select {
           font: inherit;
+          font-size: 13.5px;
           border: 1px solid var(--line);
           border-radius: 8px;
-          padding: 9px 11px;
+          padding: 0 12px;
           background: #fff;
           color: var(--ink);
-          min-height: 38px;
+          height: 40px;
+          min-height: 40px;
           width: 100%;
           box-sizing: border-box;
+          appearance: none;
+          -webkit-appearance: none;
+          line-height: 1.2;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .jod-field select {
+          padding-right: 32px;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238a8270' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 12px center;
+          cursor: pointer;
+        }
+        .jod-field input::placeholder {
+          color: #a39c8e;
+        }
+        .jod-field input:hover,
+        .jod-field select:hover {
+          border-color: #c9c1ad;
         }
         .jod-field input:focus,
         .jod-field select:focus {
@@ -481,9 +761,19 @@ export default function JobOrderDashboard() {
           border-color: var(--teal);
           box-shadow: 0 0 0 2px rgba(31, 92, 82, 0.12);
         }
+        .jod-scope {
+          margin: 0 0 10px;
+          font-size: 13px;
+          color: var(--text-2);
+          line-height: 1.4;
+        }
+        .jod-scope strong {
+          color: var(--ink);
+          font-weight: 650;
+        }
         .jod-grid {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
           gap: 12px;
           margin-bottom: 18px;
           width: 100%;
@@ -494,14 +784,17 @@ export default function JobOrderDashboard() {
           border: 1px solid var(--line);
           border-radius: 10px;
           background: #fff;
-          padding: 14px 16px 14px 18px;
+          padding: 14px 14px 14px 16px;
           cursor: pointer;
           font-family: inherit;
           color: inherit;
-          overflow: hidden;
-          min-height: 92px;
+          overflow: visible;
+          min-height: 108px;
           width: 100%;
           box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
           transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
         }
         .jod-card::before {
@@ -509,6 +802,7 @@ export default function JobOrderDashboard() {
           position: absolute;
           left: 0; top: 0; bottom: 0;
           width: 3px;
+          border-radius: 10px 0 0 10px;
           background: #cfc8b8;
         }
         .jod-card.tone-teal::before { background: var(--teal); }
@@ -528,15 +822,18 @@ export default function JobOrderDashboard() {
         .jod-card .label {
           font-size: 11px;
           font-weight: 700;
-          letter-spacing: 0.05em;
+          letter-spacing: 0.03em;
           text-transform: uppercase;
           color: #7d7666;
-          margin-bottom: 8px;
+          line-height: 1.4;
+          white-space: normal;
+          overflow: visible;
+          word-break: break-word;
         }
         .jod-card .value {
-          font-size: 28px;
+          font-size: 26px;
           font-weight: 700;
-          line-height: 1;
+          line-height: 1.1;
           font-variant-numeric: tabular-nums;
           color: var(--ink);
         }
@@ -544,16 +841,17 @@ export default function JobOrderDashboard() {
         .jod-card.tone-rust .value { color: var(--rust); }
         .jod-card.tone-amber .value { color: #9a3412; }
         .jod-card .hint {
-          margin-top: 8px;
+          margin-top: auto;
           font-size: 12px;
           color: var(--text-2);
           line-height: 1.35;
+          white-space: normal;
         }
         .jod-panel {
           border: 1px solid var(--line);
           border-radius: 12px;
           background: #fff;
-          overflow: hidden;
+          overflow: visible;
           margin-bottom: 16px;
           width: 100%;
           box-sizing: border-box;
@@ -613,13 +911,17 @@ export default function JobOrderDashboard() {
         .jod-tablewrap {
           width: 100%;
           overflow-x: auto;
+          overflow-y: visible;
           -webkit-overflow-scrolling: touch;
+          border-top: 1px solid var(--line);
         }
         .jod-table {
-          width: 100%;
-          border-collapse: collapse;
-          table-layout: fixed;
-          font-size: 13px;
+          width: max-content;
+          min-width: 100%;
+          border-collapse: separate;
+          border-spacing: 0;
+          table-layout: auto;
+          font-size: 12.5px;
         }
         .jod-table th {
           text-align: left;
@@ -627,22 +929,26 @@ export default function JobOrderDashboard() {
           font-weight: 700;
           letter-spacing: 0.04em;
           text-transform: uppercase;
-          color: #8a8270;
+          color: #7a7466;
           padding: 11px 10px;
-          border-bottom: 1px solid var(--line);
-          background: #faf8f2;
-          white-space: nowrap;
+          border-bottom: 1px solid #e4dfd2;
+          background: #f7f4ec;
+          white-space: normal;
+          line-height: 1.3;
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          vertical-align: middle;
         }
         .jod-table td {
           padding: 11px 10px;
-          border-bottom: 1px solid #ebe6d8;
+          border-bottom: 1px solid #efeae0;
           vertical-align: middle;
           color: var(--ink);
-          overflow: hidden;
         }
         .jod-table tr:last-child td { border-bottom: none; }
         .jod-table tbody tr { transition: background 0.12s ease; }
-        .jod-table tbody tr:hover { background: #faf8f2; }
+        .jod-table tbody tr:hover { background: #fbfaf6; }
         .jod-table .num {
           text-align: right;
           font-variant-numeric: tabular-nums;
@@ -650,10 +956,30 @@ export default function JobOrderDashboard() {
           font-weight: 600;
           color: var(--ink);
         }
-        .jod-clip {
-          overflow: hidden;
-          text-overflow: ellipsis;
+        .jod-table .jod-date {
+          font-variant-numeric: tabular-nums;
+          font-size: 12px;
+          color: #3f3a32;
+          letter-spacing: 0.01em;
           white-space: nowrap;
+        }
+        .jod-table .jod-challan {
+          font-weight: 700;
+          font-variant-numeric: tabular-nums;
+          letter-spacing: 0.02em;
+          white-space: nowrap;
+        }
+        .jod-table .jod-vendor {
+          font-weight: 600;
+          white-space: normal;
+          min-width: 140px;
+          max-width: 220px;
+          line-height: 1.35;
+        }
+        .jod-clip {
+          overflow: visible;
+          text-overflow: unset;
+          white-space: normal;
         }
         .jod-item {
           font-weight: 600;
@@ -668,38 +994,100 @@ export default function JobOrderDashboard() {
         .jod-pill {
           display: inline-flex;
           align-items: center;
-          max-width: 100%;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          max-width: none;
+          overflow: visible;
+          font-size: 10.5px;
+          font-weight: 700;
+          letter-spacing: 0.01em;
+          padding: 4px 8px;
+          border-radius: 6px;
+          border: 1px solid transparent;
+          background: #f0eee8;
+          color: #5c5648;
+          white-space: normal;
+          line-height: 1.3;
+          text-align: left;
+        }
+        .jod-pill.warn {
+          background: #fff4ec;
+          border-color: #f0d2bc;
+          color: #9a3412;
+        }
+        .jod-pill.amber {
+          background: #fff8e8;
+          border-color: #edd9a8;
+          color: #8a5a10;
+        }
+        .jod-pill.ok {
+          background: #eef5f3;
+          border-color: #c5ddd6;
+          color: #16483f;
+        }
+        .jod-pill.teal {
+          background: #eef6f5;
+          border-color: #c3dcd7;
+          color: #143e38;
+        }
+        .jod-table col.jod-c-challan { width: 88px; }
+        .jod-table col.jod-c-vendor { width: 180px; }
+        .jod-table col.jod-c-date { width: 108px; }
+        .jod-table col.jod-c-delay { width: 100px; }
+        .jod-table col.jod-c-cat { width: 88px; }
+        .jod-table col.jod-c-qty { width: 72px; }
+        .jod-table col.jod-c-status { width: 150px; }
+        .jod-table col.jod-c-act { width: 72px; }
+        .jod-table th .col-filter-btn,
+        .jod-table th button {
+          vertical-align: middle;
+        }
+        .jod-table td.jod-status {
+          min-width: 140px;
+        }
+        .jod-delay {
+          display: inline-flex;
+          align-items: center;
           font-size: 11px;
           font-weight: 700;
-          padding: 3px 9px;
-          border-radius: 999px;
-          background: #eceae4;
-          color: #6b6555;
+          font-variant-numeric: tabular-nums;
+          padding: 3px 7px;
+          border-radius: 6px;
+          background: #f0eee8;
+          color: #5c5648;
           white-space: nowrap;
         }
-        .jod-pill.warn { background: #ffedd5; color: #9a3412; }
-        .jod-pill.amber { background: #fef3c7; color: #92400e; }
-        .jod-pill.ok { background: #e8f0ee; color: #16483f; }
-        .jod-pill.teal { background: #e6f2f0; color: #143e38; }
-        /* Flexible middle columns fill the page; qty cols stay compact */
-        .jod-table col.jod-c-challan { width: 7%; }
-        .jod-table col.jod-c-date { width: 7%; }
-        .jod-table col.jod-c-item { width: 14%; }
-        .jod-table col.jod-c-vendor { width: 13%; }
-        .jod-table col.jod-c-cat { width: 7%; }
-        .jod-table col.jod-c-qty { width: 5.5%; }
-        .jod-table col.jod-c-pipe { width: 13%; }
-        .jod-table col.jod-c-store { width: 7%; }
-        .jod-table col.jod-c-act { width: 7%; }
+        .jod-delay-late {
+          background: #fff1eb;
+          color: var(--rust);
+        }
+        .jod-delay-early {
+          background: #eef6f3;
+          color: var(--teal-dark, var(--teal));
+        }
+        .jod-delay-ok {
+          background: #eef5f3;
+          color: #16483f;
+        }
+        .jod-table td.jod-act {
+          text-align: right;
+          padding-right: 10px;
+        }
         @media (max-width: 1100px) {
-          .jod-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .jod-toolbar {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          }
+          .jod-field.grow { grid-column: 1 / -1; }
+          .jod-grid { grid-template-columns: repeat(2, minmax(200px, 1fr)); }
           .jod-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
-        @media (max-width: 560px) {
+        @media (max-width: 640px) {
+          .jod-toolbar {
+            grid-template-columns: 1fr;
+            padding: 12px;
+          }
+          .jod-field.grow { grid-column: auto; }
           .jod-grid { grid-template-columns: 1fr; }
           .jod-stats { grid-template-columns: 1fr; }
+          .jod-card { min-height: 0; }
         }
       `}</style>
 
@@ -730,6 +1118,13 @@ export default function JobOrderDashboard() {
 
       {err && <p className="msg err" style={{ marginBottom: 12 }}>{err}</p>}
 
+      {viewOrder && (
+        <JobOrderViewModal
+          order={viewOrder}
+          onClose={() => setViewOrder(null)}
+        />
+      )}
+
       <div className="jod-toolbar">
         <div className="jod-field grow">
           <label htmlFor="jod-search">Search item / challan / vendor</label>
@@ -752,6 +1147,8 @@ export default function JobOrderDashboard() {
             onChange={(e) => {
               setJobType(e.target.value);
               setActiveKpi("total");
+              setColFilters(EMPTY_COL_FILTERS);
+              setPanelKey((k) => k + 1);
             }}
           >
             <option value="all">All types</option>
@@ -767,6 +1164,8 @@ export default function JobOrderDashboard() {
             onChange={(e) => {
               setCategoryFilter(e.target.value);
               setVendorFilter("all");
+              setActiveKpi("total");
+              setColFilters(EMPTY_COL_FILTERS);
               setPanelKey((k) => k + 1);
             }}
           >
@@ -783,6 +1182,8 @@ export default function JobOrderDashboard() {
             value={vendorFilter}
             onChange={(e) => {
               setVendorFilter(e.target.value);
+              setActiveKpi("total");
+              setColFilters(EMPTY_COL_FILTERS);
               setPanelKey((k) => k + 1);
             }}
           >
@@ -794,7 +1195,13 @@ export default function JobOrderDashboard() {
         </div>
       </div>
 
-      <div className="jod-grid">
+      {filterScopeLabel ? (
+        <p className="jod-scope">
+          Cards &amp; table filtered by <strong>{filterScopeLabel}</strong>
+        </p>
+      ) : null}
+
+      <div className="jod-grid" key={`kpi-${categoryFilter}-${vendorFilter}-${jobType}`}>
         {KPI_CARDS.map((card) => (
           <button
             key={card.id}
@@ -924,31 +1331,97 @@ export default function JobOrderDashboard() {
               <table className="jod-table">
                 <colgroup>
                   <col className="jod-c-challan" />
-                  <col className="jod-c-date" />
-                  <col className="jod-c-item" />
                   <col className="jod-c-vendor" />
+                  <col className="jod-c-date" />
+                  <col className="jod-c-date" />
+                  <col className="jod-c-date" />
+                  <col className="jod-c-delay" />
                   <col className="jod-c-cat" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
-                  <col className="jod-c-pipe" />
-                  <col className="jod-c-store" />
+                  <col className="jod-c-status" />
                   <col className="jod-c-act" />
                 </colgroup>
                 <thead>
                   <tr>
-                    <th>Challan</th>
-                    <th>Date</th>
-                    <th>Item</th>
-                    <th>Vendor</th>
-                    <th>Category</th>
-                    <th className="num">Order</th>
-                    <th className="num">Ready</th>
-                    <th className="num">Disp</th>
-                    <th className="num">Recv</th>
-                    <th>Pipeline</th>
-                    <th>Store</th>
+                    <ThFilter
+                      label="Challan"
+                      values={colOpts.challan}
+                      selected={colFilters.challan}
+                      onChange={(v) => setColFilters((f) => ({ ...f, challan: v }))}
+                    />
+                    <ThFilter
+                      label="Vendor"
+                      values={colOpts.vendor}
+                      selected={colFilters.vendor}
+                      onChange={(v) => setColFilters((f) => ({ ...f, vendor: v }))}
+                    />
+                    <ThFilter
+                      label="Dc Date"
+                      values={colOpts.dcDate}
+                      selected={colFilters.dcDate}
+                      onChange={(v) => setColFilters((f) => ({ ...f, dcDate: v }))}
+                    />
+                    <ThFilter
+                      label="Expected Date"
+                      values={colOpts.expected}
+                      selected={colFilters.expected}
+                      onChange={(v) => setColFilters((f) => ({ ...f, expected: v }))}
+                    />
+                    <ThFilter
+                      label="Delivery Date"
+                      values={colOpts.delivery}
+                      selected={colFilters.delivery}
+                      onChange={(v) => setColFilters((f) => ({ ...f, delivery: v }))}
+                    />
+                    <ThFilter
+                      label="Delay Day"
+                      values={colOpts.delay}
+                      selected={colFilters.delay}
+                      onChange={(v) => setColFilters((f) => ({ ...f, delay: v }))}
+                    />
+                    <ThFilter
+                      label="Category"
+                      values={colOpts.category}
+                      selected={colFilters.category}
+                      onChange={(v) => setColFilters((f) => ({ ...f, category: v }))}
+                    />
+                    <ThFilter
+                      label="Order"
+                      className="num"
+                      values={colOpts.orderQty}
+                      selected={colFilters.orderQty}
+                      onChange={(v) => setColFilters((f) => ({ ...f, orderQty: v }))}
+                    />
+                    <ThFilter
+                      label="Ready"
+                      className="num"
+                      values={colOpts.ready}
+                      selected={colFilters.ready}
+                      onChange={(v) => setColFilters((f) => ({ ...f, ready: v }))}
+                    />
+                    <ThFilter
+                      label="Disp"
+                      className="num"
+                      values={colOpts.dispatch}
+                      selected={colFilters.dispatch}
+                      onChange={(v) => setColFilters((f) => ({ ...f, dispatch: v }))}
+                    />
+                    <ThFilter
+                      label="Recv"
+                      className="num"
+                      values={colOpts.received}
+                      selected={colFilters.received}
+                      onChange={(v) => setColFilters((f) => ({ ...f, received: v }))}
+                    />
+                    <ThFilter
+                      label="Status"
+                      values={colOpts.pipeline}
+                      selected={colFilters.pipeline}
+                      onChange={(v) => setColFilters((f) => ({ ...f, pipeline: v }))}
+                    />
                     <th style={{ textAlign: "right" }}>Action</th>
                   </tr>
                 </thead>
@@ -963,40 +1436,39 @@ export default function JobOrderDashboard() {
                     else if (line.pipeline.includes("QC") || line.pipeline.includes("Partial")) pill = "amber";
                     else if (line.pipeline.includes("receive") || line.pipeline.includes("dispatch")) pill = "teal";
                     else if (line.pipeline.includes("complete") || line.pipeline.includes("Fully")) pill = "ok";
-                    const itemTitle = [
+                    const rowTitle = [
                       line.description,
                       jobTypeLabel(line.jobType),
                       line.projectName,
                       line.process,
-                      line.pending ? `QC ${formatQty(line.pending)}` : null,
-                      line.rework ? `Rework ${formatQty(line.rework)}` : null,
-                      line.scrap ? `Rejected ${formatQty(line.scrap)}` : null,
-                      line.receivable ? `Avail ${formatQty(line.receivable)}` : null,
                     ]
                       .filter(Boolean)
                       .join(" · ");
+                    let delayClass = "jod-delay";
+                    if (line.delayDays != null && line.delayDays > 0) delayClass += " jod-delay-late";
+                    else if (line.delayDays != null && line.delayDays < 0) delayClass += " jod-delay-early";
+                    else if (line.delayDays === 0) delayClass += " jod-delay-ok";
                     return (
-                      <tr key={line.key}>
-                        <td className="mono jod-clip" style={{ fontWeight: 700 }}>{line.srNo}</td>
-                        <td className="jod-clip">{formatDate(line.date)}</td>
-                        <td className="jod-clip" title={itemTitle}>
-                          <span className="jod-item">{line.description}</span>
-                        </td>
-                        <td className="jod-clip" title={line.vendorName}>{line.vendorName}</td>
+                      <tr key={line.key} title={rowTitle}>
+                        <td className="mono jod-clip jod-challan">{line.srNo}</td>
+                        <td className="jod-clip jod-vendor" title={line.vendorName}>{line.vendorName}</td>
+                        <td className="jod-clip jod-date">{line.dcDateLabel}</td>
+                        <td className="jod-clip jod-date">{line.expectedLabel}</td>
+                        <td className="jod-clip jod-date">{line.deliveryLabel}</td>
                         <td className="jod-clip">
-                          {vendorMaterialCategoryLabel(line.vendorName) || "—"}
+                          {line.delayLabel === "—"
+                            ? "—"
+                            : <span className={delayClass}>{line.delayLabel}</span>}
                         </td>
+                        <td className="jod-clip">{line.categoryLabel}</td>
                         <td className="num">{formatQty(line.orderQty)}</td>
                         <td className="num">{formatQty(line.ready)}</td>
                         <td className="num">{line.dispatch ? formatQty(line.dispatch) : "—"}</td>
                         <td className="num">{formatQty(line.received)}</td>
-                        <td title={line.pipeline}>
+                        <td className="jod-status" title={line.pipeline}>
                           <span className={`jod-pill${pill ? ` ${pill}` : ""}`}>{line.pipeline}</span>
                         </td>
-                        <td title={line.receiveStatus}>
-                          <span className="jod-pill">{line.receiveStatus}</span>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
+                        <td className="jod-act">
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"

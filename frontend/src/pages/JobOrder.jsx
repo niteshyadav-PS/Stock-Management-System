@@ -2591,6 +2591,159 @@ function ItemRow({ it, idx, updateItem, removeItem, disableRemove, descriptionOp
 }
 
 // ── View Details Modal ────────────────────────────────────────────────────────
+/** Host styles so ViewModal works on Job Order Dashboard too (not only /job-orders). */
+const VIEW_MODAL_HOST_STYLE = `
+  .jo-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(28, 26, 22, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .jo-modal-panel {
+    background: var(--card, #fff);
+    border: 1px solid var(--line, #e4e0d8);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: var(--shadow-lg, 0 18px 50px rgba(28, 26, 22, 0.18));
+    width: 100%;
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .jo-modal-panel--lg { max-width: 980px; }
+  .jo-modal-panel--view {
+    width: 100%;
+    max-width: 1280px;
+    min-width: 0;
+  }
+  .jo-modal-panel--view .jo-modal-header,
+  .jo-modal-panel--view .jo-modal-body {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .jo-modal-panel--view .jo-meta-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+  }
+  .jo-modal-panel--view .jo-meta-grid > div {
+    min-width: 0;
+    word-break: break-word;
+  }
+  .jo-view-items-wrap,
+  .jo-view-qc-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .jo-view-items-wrap table,
+  .jo-view-qc-wrap table {
+    width: 100%;
+    min-width: 980px;
+    table-layout: fixed;
+  }
+  .jo-view-items-wrap th,
+  .jo-view-items-wrap td,
+  .jo-view-qc-wrap th,
+  .jo-view-qc-wrap td {
+    padding: 8px 8px;
+    vertical-align: middle;
+  }
+  .jo-view-items-wrap th,
+  .jo-view-qc-wrap th {
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .jo-view-items-wrap td.num,
+  .jo-view-qc-wrap td.num {
+    white-space: nowrap;
+  }
+  .jo-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line, #e4e0d8);
+    flex-shrink: 0;
+  }
+  .jo-modal-header-text { min-width: 0; flex: 1; }
+  .jo-modal-header-text h2,
+  .jo-modal-header-text p {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  .jo-modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .jo-modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    color: #8a8270;
+    padding: 4px 8px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .jo-modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
+  .jo-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .jo-items-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  @media (max-width: 768px) {
+    .jo-modal-overlay {
+      padding: 12px;
+      align-items: flex-start;
+    }
+    .jo-modal-panel--view .jo-meta-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .jo-view-items-wrap table,
+    .jo-view-qc-wrap table { min-width: 860px; }
+    .jo-modal-header { padding: 14px 16px; flex-wrap: wrap; }
+    .jo-modal-body { padding: 14px 16px; }
+  }
+  @media (max-width: 480px) {
+    .jo-modal-overlay { padding: 0; }
+    .jo-modal-panel {
+      max-height: 100vh;
+      min-height: 100vh;
+      border-radius: 0;
+    }
+    .jo-meta-grid { grid-template-columns: 1fr; }
+  }
+`;
+
+export function JobOrderViewModal({ order, onClose, onEdit }) {
+  return <ViewModal order={order} onClose={onClose} onEdit={onEdit} />;
+}
+
 function ViewModal({ order, onClose, onEdit }) {
   const [detail, setDetail] = useState(order);
 
@@ -2662,6 +2815,7 @@ function ViewModal({ order, onClose, onEdit }) {
 
   return (
     <div className="jo-modal-overlay" onClick={onClose}>
+      <style>{VIEW_MODAL_HOST_STYLE}</style>
       <div
         className="jo-modal-panel jo-modal-panel--lg jo-modal-panel--view"
         onClick={(e) => e.stopPropagation()}

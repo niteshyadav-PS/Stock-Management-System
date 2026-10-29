@@ -36,24 +36,45 @@ export default function ColFilter({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  function handleOpen() {
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      const panelH = onSort ? 420 : 360;
-      const panelW = Math.min(320, window.innerWidth - 16);
-      const spaceBelow = window.innerHeight - rect.bottom;
-      let left = rect.left + window.scrollX;
-      if (left + panelW > window.innerWidth - 8) {
-        left = Math.max(8, window.innerWidth - panelW - 8);
-      }
-      setPos({
-        top:
-          spaceBelow < panelH
-            ? rect.top - panelH + window.scrollY
-            : rect.bottom + window.scrollY + 2,
-        left,
-      });
+  function placePanel() {
+    if (!btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    const panelW = Math.min(320, window.innerWidth - 16);
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    // Keep the panel under the table header whenever possible so KPI cards stay visible.
+    const openUp = spaceBelow < 160 && spaceAbove > spaceBelow + 40;
+    let left = rect.left;
+    if (left + panelW > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - panelW - 8);
     }
+    if (left < 8) left = 8;
+    const maxHeight = Math.min(
+      onSort ? 420 : 360,
+      Math.max(180, openUp ? spaceAbove : spaceBelow),
+    );
+    setPos({
+      top: openUp ? undefined : rect.bottom + 4,
+      bottom: openUp ? window.innerHeight - rect.top + 4 : undefined,
+      left,
+      maxHeight,
+      openUp,
+    });
+  }
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onMove = () => placePanel();
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    return () => {
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open, onSort]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleOpen() {
+    placePanel();
     setOpen((v) => !v);
   }
 
@@ -130,8 +151,9 @@ export default function ColFilter({
     <div
       ref={panelRef}
       style={{
-        position: "absolute",
-        top: pos.top,
+        position: "fixed",
+        top: pos.openUp ? "auto" : pos.top,
+        bottom: pos.openUp ? pos.bottom : "auto",
         left: pos.left,
         zIndex: 99999,
         background: "#fff",
@@ -140,8 +162,11 @@ export default function ColFilter({
         boxShadow: "0 8px 32px rgba(0,0,0,.18)",
         width: "min(320px, calc(100vw - 16px))",
         maxWidth: 320,
+        maxHeight: pos.maxHeight || 360,
         overflow: "hidden",
         boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <div
@@ -296,7 +321,7 @@ export default function ColFilter({
           </span>
         )}
       </div>
-      <div style={{ maxHeight: 200, overflowY: "auto" }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {filtered.map((v) => (
           <div
             key={v}
@@ -358,6 +383,7 @@ export default function ColFilter({
           padding: "10px 12px",
           borderTop: "1px solid var(--line)",
           background: "var(--paper-dim)",
+          flexShrink: 0,
         }}
       >
         <button
@@ -433,9 +459,11 @@ export function ThFilter({ label, values, selected, onChange, className, style }
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
+          flexWrap: "nowrap",
+          maxWidth: "100%",
         }}
       >
-        {label}{" "}
+        <span style={{ whiteSpace: "normal", lineHeight: 1.25 }}>{label}</span>
         <ColFilter values={values} selected={selected} onChange={onChange} />
       </span>
     </th>
