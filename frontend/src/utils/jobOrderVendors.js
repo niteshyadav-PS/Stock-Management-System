@@ -76,7 +76,7 @@ export const FABRICATION_VENDORS = [
   {
     name: "C - Tech Electronics",
     address:
-      "Shop No 09, Krushi Plaza, Plot no 15, Sector - 19 Apmc, Vashi, Navi Mumbai - 400705",
+      "Plot No. W-265 & 266, MIDC, Rabale, Navi Mumbai - 400705",
   },
   {
     name: "ZENPACK INNOVATIONS",

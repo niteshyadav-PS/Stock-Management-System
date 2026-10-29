@@ -11,9 +11,9 @@ import {
 
 const EMPTY_COL_FILTERS = {
   challan: [],
+  sendFrom: [],
+  sendTo: [],
   dcDate: [],
-  vendor: [],
-  category: [],
   expected: [],
   delivery: [],
   delay: [],
@@ -227,6 +227,8 @@ function lineMetrics(order, item, itemIndex) {
   const deliveryDate = itemDeliveryDate(item);
   const delayDays = calcDelayDays(expectedDate, deliveryDate);
   const categoryLabel = vendorMaterialCategoryLabel(order.vendorName) || "—";
+  const sendFromName = String(order.sendFromName || "").trim() || "—";
+  const vendorName = String(order.vendorName || "").trim() || "—";
   return {
     key: `${order._id}-${itemIndex}`,
     orderId: order._id,
@@ -234,7 +236,9 @@ function lineMetrics(order, item, itemIndex) {
     date: order.date,
     dcDateLabel: formatDate(order.date),
     jobType: order.jobType === "fabrication" ? "fabrication" : "powder_coating",
-    vendorName: String(order.vendorName || "").trim() || "—",
+    sendFromName,
+    vendorName,
+    sendToName: vendorName,
     categoryLabel,
     vehicleNo: order.vehicleNo || "",
     expectedDate,
@@ -482,6 +486,8 @@ export default function JobOrderDashboard() {
             l.projectName,
             l.process,
             l.srNo,
+            l.sendFromName,
+            l.sendToName,
             l.vendorName,
             l.categoryLabel,
             l.dcDateLabel,
@@ -501,14 +507,14 @@ export default function JobOrderDashboard() {
     if (colFilters.challan.length) {
       list = list.filter((l) => matchesColFilter(colFilters.challan, l.srNo));
     }
+    if (colFilters.sendFrom.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.sendFrom, l.sendFromName));
+    }
+    if (colFilters.sendTo.length) {
+      list = list.filter((l) => matchesColFilter(colFilters.sendTo, l.sendToName));
+    }
     if (colFilters.dcDate.length) {
       list = list.filter((l) => matchesColFilter(colFilters.dcDate, l.dcDateLabel));
-    }
-    if (colFilters.vendor.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.vendor, l.vendorName));
-    }
-    if (colFilters.category.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.category, l.categoryLabel));
     }
     if (colFilters.expected.length) {
       list = list.filter((l) => matchesColFilter(colFilters.expected, l.expectedLabel));
@@ -546,9 +552,9 @@ export default function JobOrderDashboard() {
     });
     return {
       challan: base.map((l) => l.srNo),
+      sendFrom: base.map((l) => l.sendFromName),
+      sendTo: base.map((l) => l.sendToName),
       dcDate: base.map((l) => l.dcDateLabel),
-      vendor: base.map((l) => l.vendorName),
-      category: base.map((l) => l.categoryLabel),
       expected: base.map((l) => l.expectedLabel),
       delivery: base.map((l) => l.deliveryLabel),
       delay: base.map((l) => l.delayLabel),
@@ -1029,13 +1035,19 @@ export default function JobOrderDashboard() {
           color: #143e38;
         }
         .jod-table col.jod-c-challan { width: 88px; }
-        .jod-table col.jod-c-vendor { width: 180px; }
+        .jod-table col.jod-c-party { width: 160px; }
         .jod-table col.jod-c-date { width: 108px; }
         .jod-table col.jod-c-delay { width: 100px; }
-        .jod-table col.jod-c-cat { width: 88px; }
         .jod-table col.jod-c-qty { width: 72px; }
         .jod-table col.jod-c-status { width: 150px; }
         .jod-table col.jod-c-act { width: 72px; }
+        .jod-table .jod-party {
+          font-weight: 600;
+          white-space: normal;
+          min-width: 120px;
+          max-width: 200px;
+          line-height: 1.35;
+        }
         .jod-table th .col-filter-btn,
         .jod-table th button {
           vertical-align: middle;
@@ -1331,12 +1343,12 @@ export default function JobOrderDashboard() {
               <table className="jod-table">
                 <colgroup>
                   <col className="jod-c-challan" />
-                  <col className="jod-c-vendor" />
+                  <col className="jod-c-party" />
+                  <col className="jod-c-party" />
                   <col className="jod-c-date" />
                   <col className="jod-c-date" />
                   <col className="jod-c-date" />
                   <col className="jod-c-delay" />
-                  <col className="jod-c-cat" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
@@ -1353,10 +1365,16 @@ export default function JobOrderDashboard() {
                       onChange={(v) => setColFilters((f) => ({ ...f, challan: v }))}
                     />
                     <ThFilter
-                      label="Vendor"
-                      values={colOpts.vendor}
-                      selected={colFilters.vendor}
-                      onChange={(v) => setColFilters((f) => ({ ...f, vendor: v }))}
+                      label="Send From"
+                      values={colOpts.sendFrom}
+                      selected={colFilters.sendFrom}
+                      onChange={(v) => setColFilters((f) => ({ ...f, sendFrom: v }))}
+                    />
+                    <ThFilter
+                      label="Send To"
+                      values={colOpts.sendTo}
+                      selected={colFilters.sendTo}
+                      onChange={(v) => setColFilters((f) => ({ ...f, sendTo: v }))}
                     />
                     <ThFilter
                       label="Dc Date"
@@ -1381,12 +1399,6 @@ export default function JobOrderDashboard() {
                       values={colOpts.delay}
                       selected={colFilters.delay}
                       onChange={(v) => setColFilters((f) => ({ ...f, delay: v }))}
-                    />
-                    <ThFilter
-                      label="Category"
-                      values={colOpts.category}
-                      selected={colFilters.category}
-                      onChange={(v) => setColFilters((f) => ({ ...f, category: v }))}
                     />
                     <ThFilter
                       label="Order"
@@ -1451,7 +1463,8 @@ export default function JobOrderDashboard() {
                     return (
                       <tr key={line.key} title={rowTitle}>
                         <td className="mono jod-clip jod-challan">{line.srNo}</td>
-                        <td className="jod-clip jod-vendor" title={line.vendorName}>{line.vendorName}</td>
+                        <td className="jod-clip jod-party" title={line.sendFromName}>{line.sendFromName}</td>
+                        <td className="jod-clip jod-party" title={line.sendToName}>{line.sendToName}</td>
                         <td className="jod-clip jod-date">{line.dcDateLabel}</td>
                         <td className="jod-clip jod-date">{line.expectedLabel}</td>
                         <td className="jod-clip jod-date">{line.deliveryLabel}</td>
@@ -1460,7 +1473,6 @@ export default function JobOrderDashboard() {
                             ? "—"
                             : <span className={delayClass}>{line.delayLabel}</span>}
                         </td>
-                        <td className="jod-clip">{line.categoryLabel}</td>
                         <td className="num">{formatQty(line.orderQty)}</td>
                         <td className="num">{formatQty(line.ready)}</td>
                         <td className="num">{line.dispatch ? formatQty(line.dispatch) : "—"}</td>
