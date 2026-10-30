@@ -6,13 +6,17 @@ import { todayStr } from "../utils/helpers";
 import {
   unwrapList,
   getJobOrderNameValues,
+  getJobOrderVendors,
   renameJobOrderNames,
 } from "../api/api";
 import Pagination from "../components/Pagination";
 import RenameFieldNames from "../components/RenameFieldNames";
 import VendorQc from "./VendorQc";
 import useClientPagination from "../hooks/useClientPagination";
-import { vendorsForJobType } from "../utils/jobOrderVendors";
+import {
+  setJobOrderVendorsCache,
+  vendorsForJobType,
+} from "../utils/jobOrderVendors";
 
 const JO_RENAME_FIELDS = [
   { key: "sendFromName", label: "Send From" },
@@ -3695,7 +3699,26 @@ function EditModal({ order, onSave, onClose }) {
   const itemsLocked = order.status !== "issued";
   const editJobType =
     order.jobType === "fabrication" ? "fabrication" : "powder_coating";
-  const vendors = vendorsForJobType(editJobType);
+  const [vendorRev, setVendorRev] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = unwrapList(await getJobOrderVendors({ active: "true" }));
+        setJobOrderVendorsCache(rows);
+        if (alive) setVendorRev((n) => n + 1);
+      } catch {
+        /* keep fallback presets */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const vendors = useMemo(
+    () => vendorsForJobType(editJobType),
+    [editJobType, vendorRev],
+  );
   const descriptionOptions = FABRICATION_ITEM_DESCRIPTIONS;
 
   const [srNo, setSrNo] = useState(order.srNo || "");
@@ -3751,7 +3774,7 @@ function EditModal({ order, onSave, onClose }) {
     setVehicleNo(order.vehicleNo || "");
     setIssuedBy(order.issuedBy || "");
     setDeliveryAddress(order.deliveryAddress || "");
-  }, [order]);
+  }, [order, vendors]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -4192,7 +4215,26 @@ export default function JobOrder({ jobType = "powder_coating" }) {
   const focusHandledRef = useRef("");
   const meta = JOB_TYPE_META[jobType] || JOB_TYPE_META.powder_coating;
   const resolvedJobType = meta.key;
-  const vendors = vendorsForJobType(resolvedJobType);
+  const [vendorRev, setVendorRev] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = unwrapList(await getJobOrderVendors({ active: "true" }));
+        setJobOrderVendorsCache(rows);
+        if (alive) setVendorRev((n) => n + 1);
+      } catch {
+        /* keep fallback presets */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const vendors = useMemo(
+    () => vendorsForJobType(resolvedJobType),
+    [resolvedJobType, vendorRev],
+  );
 
   const canCreate = CREATE_ROLES.includes(user?.role);
   const canReceive = RECEIVE_ROLES.includes(user?.role);

@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getJobOrders, unwrapList } from "../api/api";
+import { getJobOrders, getJobOrderVendors, unwrapList } from "../api/api";
 import { ThFilter } from "../components/ColFilter";
 import { JobOrderViewModal } from "./JobOrder";
 import {
   VENDOR_MATERIAL_CATEGORIES,
+  setJobOrderVendorsCache,
   vendorMaterialCategory,
   vendorMaterialCategoryLabel,
 } from "../utils/jobOrderVendors";
@@ -101,10 +101,6 @@ function jobTypeLabel(type) {
   return type === "fabrication" ? "Fabrication" : "Powder Coating";
 }
 
-function jobTypeShort(type) {
-  return type === "fabrication" ? "Fab" : "PC";
-}
-
 /** Case/whitespace key so "Fusion Metal" and "FUSION METAL" collapse in filters. */
 function vendorKey(name) {
   return String(name || "")
@@ -178,30 +174,6 @@ function receivableNow(item) {
   return round3(Math.min(dispatchLeft, orderLeft));
 }
 
-function itemPipelineStatus(item, order) {
-  const orderQty = num(item?.qty);
-  const ready = submittedReadyQty(item);
-  const pending = pendingQcQty(item);
-  const rework = reworkQty(item);
-  const scrap = scrapQty(item);
-  const dispatch = readyToDispatchQty(item);
-  const received = num(item?.receivedQty);
-  // Store already took full qty — don't keep "Awaiting vendor" on old challans.
-  if (orderQty > 0 && received >= orderQty - 0.001) return "Fully received";
-  if (order?.status === "received") return "Fully received";
-  if (!isVendorAcknowledged(order)) return "Awaiting vendor receive";
-  if (pending > 0.001) return "With QC";
-  if (rework > 0.001) return "Rework open";
-  if (scrap > 0.001 && pending <= 0.001 && rework <= 0.001 && receivableNow(item) <= 0.001) {
-    return "Rejected (scrap)";
-  }
-  if (receivableNow(item) > 0.001) return "Ready to receive";
-  if (dispatch > 0.001 && received < dispatch - 0.001) return "Ready to dispatch";
-  if (orderQty > 0 && ready >= orderQty - 0.001) return "Inspection complete";
-  if (ready > 0.001) return "In process";
-  return "Waiting for vendor qty";
-}
-
 function receiveStatus(order) {
   const status = order?.status || "issued";
   return status.charAt(0).toUpperCase() + status.slice(1);
@@ -214,23 +186,65 @@ function normalize(s) {
     .trim();
 }
 
-function lineMetrics(order, item, itemIndex) {
-  const orderQty = num(item?.qty);
-  const ready = submittedReadyQty(item);
-  const pending = pendingQcQty(item);
-  const dispatch = readyToDispatchQty(item);
-  const rework = reworkQty(item);
-  const scrap = scrapQty(item);
-  const received = num(item?.receivedQty);
-  const receivable = receivableNow(item);
+/** One dashboard row per challan (item details stay in View). */
+function challanMetrics(order) {
+  const items = order?.items || [];
+  let orderQty = 0;
+  let ready = 0;
+  let pending = 0;
+  let dispatch = 0;
+  let rework = 0;
+  let scrap = 0;
+  let received = 0;
+  let receivable = 0;
+  let deliveryDate = "";
+  const itemNames = [];
+  const projectNames = [];
+
+  items.forEach((item) => {
+    orderQty += num(item?.qty);
+    ready += submittedReadyQty(item);
+    pending += pendingQcQty(item);
+    dispatch += readyToDispatchQty(item);
+    rework += reworkQty(item);
+    scrap += scrapQty(item);
+    received += num(item?.receivedQty);
+    receivable += receivableNow(item);
+    const day = itemDeliveryDate(item);
+    if (day && (!deliveryDate || day > deliveryDate)) deliveryDate = day;
+    const desc = String(item?.description || "").trim();
+    if (desc) itemNames.push(desc);
+    const project = String(item?.projectName || "").trim();
+    if (project) projectNames.push(project);
+  });
+
+  orderQty = round3(orderQty);
+  ready = round3(ready);
+  pending = round3(pending);
+  dispatch = round3(dispatch);
+  rework = round3(rework);
+  scrap = round3(scrap);
+  received = round3(received);
+  receivable = round3(receivable);
+
   const expectedDate = String(order.vendorExpectedDate || "").trim().slice(0, 10);
-  const deliveryDate = itemDeliveryDate(item);
   const delayDays = calcDelayDays(expectedDate, deliveryDate);
-  const categoryLabel = vendorMaterialCategoryLabel(order.vendorName) || "—";
   const sendFromName = String(order.sendFromName || "").trim() || "—";
   const vendorName = String(order.vendorName || "").trim() || "—";
+  const categoryLabel = vendorMaterialCategoryLabel(order.vendorName) || "—";
+  const totals = {
+    orderQty,
+    ready,
+    pending,
+    dispatch,
+    rework,
+    scrap,
+    received,
+    receivable,
+  };
+
   return {
-    key: `${order._id}-${itemIndex}`,
+    key: String(order._id),
     orderId: order._id,
     srNo: order.srNo,
     date: order.date,
@@ -250,10 +264,9 @@ function lineMetrics(order, item, itemIndex) {
     acknowledged: isVendorAcknowledged(order),
     receiveStatus: receiveStatus(order),
     orderStatus: order.status || "issued",
-    description: String(item?.description || "").trim() || "—",
-    process: item?.process || "",
-    projectName: item?.projectName || "",
-    unit: item?.unit || "NOS",
+    itemCount: items.length,
+    itemNames,
+    projectNames: [...new Set(projectNames)],
     orderQty,
     ready,
     pending,
@@ -263,8 +276,32 @@ function lineMetrics(order, item, itemIndex) {
     received,
     receivable,
     balance: Math.max(0, round3(orderQty - received)),
-    pipeline: itemPipelineStatus(item, order),
+    pipeline: challanPipelineStatus(totals, order),
   };
+}
+
+function challanPipelineStatus(totals, order) {
+  const orderQty = num(totals.orderQty);
+  const ready = num(totals.ready);
+  const pending = num(totals.pending);
+  const rework = num(totals.rework);
+  const scrap = num(totals.scrap);
+  const dispatch = num(totals.dispatch);
+  const received = num(totals.received);
+  const receivable = num(totals.receivable);
+  if (orderQty > 0 && received >= orderQty - 0.001) return "Fully received";
+  if (order?.status === "received") return "Fully received";
+  if (!isVendorAcknowledged(order)) return "Awaiting vendor receive";
+  if (pending > 0.001) return "With QC";
+  if (rework > 0.001) return "Rework open";
+  if (scrap > 0.001 && pending <= 0.001 && rework <= 0.001 && receivable <= 0.001) {
+    return "Rejected (scrap)";
+  }
+  if (receivable > 0.001) return "Ready to receive";
+  if (dispatch > 0.001 && received < dispatch - 0.001) return "Ready to dispatch";
+  if (orderQty > 0 && ready >= orderQty - 0.001) return "Inspection complete";
+  if (ready > 0.001) return "In process";
+  return "Waiting for vendor qty";
 }
 
 function isFullyDelivered(line) {
@@ -282,102 +319,88 @@ function isPartialDelivered(line) {
   );
 }
 
-function lineMatchesKpi(line, kpiId) {
+function challanMatchesKpi(row, kpiId) {
   if (kpiId === "total") return true;
-  // Vendor has not confirmed / received the challan yet.
   if (kpiId === "waiting_vendor") {
-    return !line.acknowledged && !isFullyDelivered(line);
+    return !row.acknowledged && !isFullyDelivered(row);
   }
-  // Vendor received it; work ongoing (nothing waiting at QC / ready to take / rework).
   if (kpiId === "in_process") {
     return (
-      line.acknowledged
-      && !isFullyDelivered(line)
-      && line.received <= 0.001
-      && line.pending <= 0.001
-      && line.receivable <= 0.001
-      && line.rework <= 0.001
+      row.acknowledged
+      && !isFullyDelivered(row)
+      && row.received <= 0.001
+      && row.pending <= 0.001
+      && row.receivable <= 0.001
+      && row.rework <= 0.001
     );
   }
-  if (kpiId === "pending_qc") return line.pending > 0.001;
-  // QC-approved qty ready for factory/site to receive.
-  if (kpiId === "ready_dispatch") return line.receivable > 0.001;
-  if (kpiId === "partial") return isPartialDelivered(line);
-  if (kpiId === "completed") return isFullyDelivered(line);
-  if (kpiId === "rework") return line.rework > 0.001;
-  if (kpiId === "rejected") return line.scrap > 0.001;
+  if (kpiId === "pending_qc") return row.pending > 0.001;
+  if (kpiId === "ready_dispatch") return row.receivable > 0.001;
+  if (kpiId === "partial") return isPartialDelivered(row);
+  if (kpiId === "completed") return isFullyDelivered(row);
+  if (kpiId === "rework") return row.rework > 0.001;
+  if (kpiId === "rejected") return row.scrap > 0.001;
   return true;
 }
 
-// Card value: "challans" = distinct challans, "lines" = matching item rows (same as table).
 const KPI_CARDS = [
   {
     id: "total",
     label: "Total Challan",
     tone: "ink",
     hint: "All job order challans",
-    countBy: "challans",
   },
   {
     id: "waiting_vendor",
     label: "Waiting for Vendor Confirmation",
     tone: "rust",
     hint: "Pending vendor receive",
-    countBy: "challans",
   },
   {
     id: "in_process",
     label: "In Process",
     tone: "amber",
     hint: "Vendor has received the job order",
-    countBy: "challans",
   },
   {
     id: "pending_qc",
     label: "Pending QC",
     tone: "amber",
     hint: "Pending on QC",
-    countBy: "lines",
   },
   {
     id: "ready_dispatch",
     label: "Ready to Dispatch",
     tone: "teal",
     hint: "Ready material available to receive",
-    countBy: "lines",
   },
   {
     id: "partial",
     label: "Partial Delivered at Factory/Site",
     tone: "amber",
     hint: "Partially received material",
-    countBy: "challans",
   },
   {
     id: "completed",
     label: "Fully Delivered at Factory/Site",
     tone: "ink",
     hint: "Fully received material",
-    countBy: "challans",
   },
   {
     id: "rework",
     label: "Rework",
     tone: "rust",
     hint: "Items sent back for rework",
-    countBy: "lines",
   },
   {
     id: "rejected",
     label: "Reject",
     tone: "rust",
     hint: "Permanently rejected qty",
-    countBy: "lines",
   },
 ];
 
 export default function JobOrderDashboard() {
-  const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -389,6 +412,7 @@ export default function JobOrderDashboard() {
   const [colFilters, setColFilters] = useState(EMPTY_COL_FILTERS);
   const [panelKey, setPanelKey] = useState(0);
   const [viewOrder, setViewOrder] = useState(null);
+  const [vendorRev, setVendorRev] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -409,29 +433,40 @@ export default function JobOrderDashboard() {
     load();
   }, [load]);
 
-  const lines = useMemo(() => {
-    const out = [];
-    for (const order of orders) {
-      (order.items || []).forEach((item, itemIndex) => {
-        out.push(lineMetrics(order, item, itemIndex));
-      });
-    }
-    return out;
-  }, [orders]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = unwrapList(await getJobOrderVendors({ active: "true" }));
+        setJobOrderVendorsCache(rows);
+        if (alive) setVendorRev((n) => n + 1);
+      } catch {
+        /* keep token matchers */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-  const categoryScopedLines = useMemo(() => {
-    if (categoryFilter === "all") return lines;
-    return lines.filter(
-      (l) => vendorMaterialCategory(l.vendorName) === categoryFilter,
+  const challans = useMemo(
+    () => orders.map((order) => challanMetrics(order)),
+    [orders],
+  );
+
+  const categoryScoped = useMemo(() => {
+    if (categoryFilter === "all") return challans;
+    return challans.filter(
+      (row) => vendorMaterialCategory(row.vendorName) === categoryFilter,
     );
-  }, [lines, categoryFilter]);
+  }, [challans, categoryFilter, vendorRev]);
 
   const vendors = useMemo(() => {
-    const names = categoryScopedLines.map((line) => line.vendorName).filter(Boolean);
+    const names = categoryScoped.map((row) => row.vendorName).filter(Boolean);
     return dedupeVendorNames(names).sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: "base" }),
     );
-  }, [categoryScopedLines]);
+  }, [categoryScoped]);
 
   // Drop vendor pick if it is outside the selected category.
   useEffect(() => {
@@ -442,24 +477,21 @@ export default function JobOrderDashboard() {
   }, [vendors, vendorFilter]);
 
   // Cards + table share this scope (job type from API load, then category + vendor).
-  const scopedLines = useMemo(() => {
-    if (vendorFilter === "all") return categoryScopedLines;
+  const scopedChallans = useMemo(() => {
+    if (vendorFilter === "all") return categoryScoped;
     const key = vendorKey(vendorFilter);
-    return categoryScopedLines.filter((l) => vendorKey(l.vendorName) === key);
-  }, [categoryScopedLines, vendorFilter]);
+    return categoryScoped.filter((row) => vendorKey(row.vendorName) === key);
+  }, [categoryScoped, vendorFilter]);
 
   const counts = useMemo(() => {
     const out = {};
     for (const card of KPI_CARDS) {
-      const matching = scopedLines.filter((l) => lineMatchesKpi(l, card.id));
-      if (card.countBy === "lines") {
-        out[card.id] = matching.length;
-      } else {
-        out[card.id] = new Set(matching.map((l) => l.orderId)).size;
-      }
+      out[card.id] = scopedChallans.filter((row) =>
+        challanMatchesKpi(row, card.id),
+      ).length;
     }
     return out;
-  }, [scopedLines, categoryFilter, vendorFilter]);
+  }, [scopedChallans, categoryFilter, vendorFilter]);
 
   const filterScopeLabel = useMemo(() => {
     const parts = [];
@@ -476,177 +508,94 @@ export default function JobOrderDashboard() {
 
   const q = normalize(search);
 
-  const filteredLines = useMemo(() => {
-    let list = scopedLines;
+  const filteredChallans = useMemo(() => {
+    let list = scopedChallans;
     if (q) {
-      list = list.filter((l) => {
+      list = list.filter((row) => {
         const hay = normalize(
           [
-            l.description,
-            l.projectName,
-            l.process,
-            l.srNo,
-            l.sendFromName,
-            l.sendToName,
-            l.vendorName,
-            l.categoryLabel,
-            l.dcDateLabel,
-            l.expectedLabel,
-            l.deliveryLabel,
-            l.delayLabel,
-            l.vehicleNo,
-            l.pipeline,
+            row.srNo,
+            row.sendFromName,
+            row.sendToName,
+            row.vendorName,
+            row.categoryLabel,
+            row.dcDateLabel,
+            row.expectedLabel,
+            row.deliveryLabel,
+            row.delayLabel,
+            row.vehicleNo,
+            row.pipeline,
+            ...(row.itemNames || []),
+            ...(row.projectNames || []),
           ].join(" "),
         );
         return hay.includes(q);
       });
     }
     if (activeKpi !== "total") {
-      list = list.filter((l) => lineMatchesKpi(l, activeKpi));
+      list = list.filter((row) => challanMatchesKpi(row, activeKpi));
     }
     if (colFilters.challan.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.challan, l.srNo));
+      list = list.filter((row) => matchesColFilter(colFilters.challan, row.srNo));
     }
     if (colFilters.sendFrom.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.sendFrom, l.sendFromName));
+      list = list.filter((row) => matchesColFilter(colFilters.sendFrom, row.sendFromName));
     }
     if (colFilters.sendTo.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.sendTo, l.sendToName));
+      list = list.filter((row) => matchesColFilter(colFilters.sendTo, row.sendToName));
     }
     if (colFilters.dcDate.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.dcDate, l.dcDateLabel));
+      list = list.filter((row) => matchesColFilter(colFilters.dcDate, row.dcDateLabel));
     }
     if (colFilters.expected.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.expected, l.expectedLabel));
+      list = list.filter((row) => matchesColFilter(colFilters.expected, row.expectedLabel));
     }
     if (colFilters.delivery.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.delivery, l.deliveryLabel));
+      list = list.filter((row) => matchesColFilter(colFilters.delivery, row.deliveryLabel));
     }
     if (colFilters.delay.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.delay, l.delayLabel));
+      list = list.filter((row) => matchesColFilter(colFilters.delay, row.delayLabel));
     }
     if (colFilters.orderQty.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.orderQty, formatQty(l.orderQty)));
+      list = list.filter((row) => matchesColFilter(colFilters.orderQty, formatQty(row.orderQty)));
     }
     if (colFilters.ready.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.ready, formatQty(l.ready)));
+      list = list.filter((row) => matchesColFilter(colFilters.ready, formatQty(row.ready)));
     }
     if (colFilters.dispatch.length) {
-      list = list.filter((l) =>
-        matchesColFilter(colFilters.dispatch, l.dispatch ? formatQty(l.dispatch) : "—"),
+      list = list.filter((row) =>
+        matchesColFilter(colFilters.dispatch, row.dispatch ? formatQty(row.dispatch) : "—"),
       );
     }
     if (colFilters.received.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.received, formatQty(l.received)));
+      list = list.filter((row) => matchesColFilter(colFilters.received, formatQty(row.received)));
     }
     if (colFilters.pipeline.length) {
-      list = list.filter((l) => matchesColFilter(colFilters.pipeline, l.pipeline));
+      list = list.filter((row) => matchesColFilter(colFilters.pipeline, row.pipeline));
     }
     return list;
-  }, [scopedLines, q, activeKpi, colFilters]);
+  }, [scopedChallans, q, activeKpi, colFilters]);
 
   const colOpts = useMemo(() => {
-    const base = scopedLines.filter((l) => {
-      if (activeKpi !== "total" && !lineMatchesKpi(l, activeKpi)) return false;
+    const base = scopedChallans.filter((row) => {
+      if (activeKpi !== "total" && !challanMatchesKpi(row, activeKpi)) return false;
       return true;
     });
     return {
-      challan: base.map((l) => l.srNo),
-      sendFrom: base.map((l) => l.sendFromName),
-      sendTo: base.map((l) => l.sendToName),
-      dcDate: base.map((l) => l.dcDateLabel),
-      expected: base.map((l) => l.expectedLabel),
-      delivery: base.map((l) => l.deliveryLabel),
-      delay: base.map((l) => l.delayLabel),
-      orderQty: base.map((l) => formatQty(l.orderQty)),
-      ready: base.map((l) => formatQty(l.ready)),
-      dispatch: base.map((l) => (l.dispatch ? formatQty(l.dispatch) : "—")),
-      received: base.map((l) => formatQty(l.received)),
-      pipeline: base.map((l) => l.pipeline),
+      challan: base.map((row) => row.srNo),
+      sendFrom: base.map((row) => row.sendFromName),
+      sendTo: base.map((row) => row.sendToName),
+      dcDate: base.map((row) => row.dcDateLabel),
+      expected: base.map((row) => row.expectedLabel),
+      delivery: base.map((row) => row.deliveryLabel),
+      delay: base.map((row) => row.delayLabel),
+      orderQty: base.map((row) => formatQty(row.orderQty)),
+      ready: base.map((row) => formatQty(row.ready)),
+      dispatch: base.map((row) => (row.dispatch ? formatQty(row.dispatch) : "—")),
+      received: base.map((row) => formatQty(row.received)),
+      pipeline: base.map((row) => row.pipeline),
     };
-  }, [scopedLines, activeKpi]);
-
-  const filteredChallanCount = useMemo(
-    () => new Set(filteredLines.map((l) => l.orderId)).size,
-    [filteredLines],
-  );
-
-  const vendorSummary = useMemo(() => {
-    if (!q) return [];
-    const map = new Map();
-    for (const line of filteredLines) {
-      const key = `${line.vendorName}||${line.jobType}||${normalize(line.description)}`;
-      if (!map.has(key)) {
-        map.set(key, {
-          key,
-          vendorName: line.vendorName,
-          jobType: line.jobType,
-          description: line.description,
-          unit: line.unit,
-          challans: 0,
-          orderQty: 0,
-          ready: 0,
-          pending: 0,
-          dispatch: 0,
-          rework: 0,
-          scrap: 0,
-          received: 0,
-          receivable: 0,
-          balance: 0,
-          statuses: new Set(),
-        });
-      }
-      const row = map.get(key);
-      row.challans += 1;
-      row.orderQty = round3(row.orderQty + line.orderQty);
-      row.ready = round3(row.ready + line.ready);
-      row.pending = round3(row.pending + line.pending);
-      row.dispatch = round3(row.dispatch + line.dispatch);
-      row.rework = round3(row.rework + line.rework);
-      row.scrap = round3(row.scrap + line.scrap);
-      row.received = round3(row.received + line.received);
-      row.receivable = round3(row.receivable + line.receivable);
-      row.balance = round3(row.balance + line.balance);
-      row.statuses.add(line.pipeline);
-    }
-    return [...map.values()]
-      .map((row) => ({
-        ...row,
-        statusText: [...row.statuses].join(" · "),
-      }))
-      .sort((a, b) => {
-        const v = a.vendorName.localeCompare(b.vendorName, undefined, { sensitivity: "base" });
-        if (v) return v;
-        return a.description.localeCompare(b.description, undefined, { sensitivity: "base" });
-      });
-  }, [filteredLines, q]);
-
-  const totals = useMemo(() => {
-    return filteredLines.reduce(
-      (acc, line) => ({
-        orderQty: round3(acc.orderQty + line.orderQty),
-        ready: round3(acc.ready + line.ready),
-        pending: round3(acc.pending + line.pending),
-        dispatch: round3(acc.dispatch + line.dispatch),
-        rework: round3(acc.rework + line.rework),
-        scrap: round3(acc.scrap + line.scrap),
-        received: round3(acc.received + line.received),
-        receivable: round3(acc.receivable + line.receivable),
-        balance: round3(acc.balance + line.balance),
-      }),
-      {
-        orderQty: 0,
-        ready: 0,
-        pending: 0,
-        dispatch: 0,
-        rework: 0,
-        scrap: 0,
-        received: 0,
-        receivable: 0,
-        balance: 0,
-      },
-    );
-  }, [filteredLines]);
+  }, [scopedChallans, activeKpi]);
 
   function selectKpi(id) {
     // Second click on the same card clears the filter (back to all challans).
@@ -656,20 +605,20 @@ export default function JobOrderDashboard() {
     setPanelKey((k) => k + 1);
   }
 
-  function openOrder(line) {
-    const found = orders.find((o) => String(o._id) === String(line.orderId));
+  function openOrder(row) {
+    const found = orders.find((o) => String(o._id) === String(row.orderId));
     if (found) {
       setViewOrder(found);
       return;
     }
     setViewOrder({
-      _id: line.orderId,
-      srNo: line.srNo,
-      date: line.date,
-      jobType: line.jobType,
-      vendorName: line.vendorName,
-      vendorExpectedDate: line.expectedDate,
-      status: line.orderStatus,
+      _id: row.orderId,
+      srNo: row.srNo,
+      date: row.date,
+      jobType: row.jobType,
+      vendorName: row.vendorName,
+      vendorExpectedDate: row.expectedDate,
+      status: row.orderStatus,
       items: [],
     });
   }
@@ -916,6 +865,7 @@ export default function JobOrderDashboard() {
         }
         .jod-tablewrap {
           width: 100%;
+          max-width: 100%;
           overflow-x: auto;
           overflow-y: visible;
           -webkit-overflow-scrolling: touch;
@@ -1035,17 +985,17 @@ export default function JobOrderDashboard() {
           color: #143e38;
         }
         .jod-table col.jod-c-challan { width: 88px; }
-        .jod-table col.jod-c-party { width: 160px; }
-        .jod-table col.jod-c-date { width: 108px; }
-        .jod-table col.jod-c-delay { width: 100px; }
-        .jod-table col.jod-c-qty { width: 72px; }
-        .jod-table col.jod-c-status { width: 150px; }
-        .jod-table col.jod-c-act { width: 72px; }
+        .jod-table col.jod-c-party { width: 150px; }
+        .jod-table col.jod-c-date { width: 100px; }
+        .jod-table col.jod-c-delay { width: 96px; }
+        .jod-table col.jod-c-qty { width: 68px; }
+        .jod-table col.jod-c-status { width: 140px; }
+        .jod-table col.jod-c-act { width: 96px; }
         .jod-table .jod-party {
           font-weight: 600;
           white-space: normal;
-          min-width: 120px;
-          max-width: 200px;
+          min-width: 110px;
+          max-width: 180px;
           line-height: 1.35;
         }
         .jod-table th .col-filter-btn,
@@ -1053,7 +1003,7 @@ export default function JobOrderDashboard() {
           vertical-align: middle;
         }
         .jod-table td.jod-status {
-          min-width: 140px;
+          min-width: 130px;
         }
         .jod-delay {
           display: inline-flex;
@@ -1079,9 +1029,30 @@ export default function JobOrderDashboard() {
           background: #eef5f3;
           color: #16483f;
         }
+        /* Keep Action + View fully visible while scrolling wide tables. */
+        .jod-table th.jod-act,
         .jod-table td.jod-act {
-          text-align: right;
-          padding-right: 10px;
+          position: sticky;
+          right: 0;
+          z-index: 3;
+          min-width: 96px;
+          width: 96px;
+          box-sizing: border-box;
+          text-align: center;
+          padding: 10px 12px;
+          white-space: nowrap;
+          background: #fff;
+          box-shadow: -6px 0 10px rgba(28, 26, 22, 0.06);
+        }
+        .jod-table th.jod-act {
+          z-index: 4;
+          background: #f7f4ec;
+        }
+        .jod-table tbody tr:hover td.jod-act {
+          background: #fbfaf6;
+        }
+        .jod-table td.jod-act .btn {
+          white-space: nowrap;
         }
         @media (max-width: 1100px) {
           .jod-toolbar {
@@ -1111,20 +1082,6 @@ export default function JobOrderDashboard() {
           <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => navigate("/job-orders")}
-          >
-            Powder Coating
-          </button>
-          <button
-            type="button"
-            className="btn btn-in btn-sm"
-            onClick={() => navigate("/job-orders/fabrication")}
-          >
-            Fabrication
-          </button>
         </div>
       </div>
 
@@ -1139,7 +1096,7 @@ export default function JobOrderDashboard() {
 
       <div className="jod-toolbar">
         <div className="jod-field grow">
-          <label htmlFor="jod-search">Search item / challan / vendor</label>
+          <label htmlFor="jod-search">Search challan / vendor / item</label>
           <input
             id="jod-search"
             type="search"
@@ -1228,116 +1185,22 @@ export default function JobOrderDashboard() {
         ))}
       </div>
 
-      {q ? (
-        <div className="jod-panel">
-          <div className="jod-panel-head">
-            <div>
-              <h3>
-                Item by vendor
-                <span className="pill-count">{vendorSummary.length}</span>
-              </h3>
-            </div>
-          </div>
-          <div key={`vendor-${panelKey}`} className="jod-panel-body">
-            {loading ? (
-              <div className="jod-empty">Loading…</div>
-            ) : vendorSummary.length === 0 ? (
-              <div className="jod-empty">No matching items for this search.</div>
-            ) : (
-              <>
-                <div className="jod-stats">
-                  <div className="jod-stat">
-                    <span>Order qty</span>
-                    <strong>{formatQty(totals.orderQty)}</strong>
-                  </div>
-                  <div className="jod-stat">
-                    <span>With vendors (ready)</span>
-                    <strong>{formatQty(totals.ready)}</strong>
-                  </div>
-                  <div className="jod-stat">
-                    <span>Ready to dispatch</span>
-                    <strong>{formatQty(totals.dispatch)}</strong>
-                  </div>
-                  <div className="jod-stat">
-                    <span>Received at store</span>
-                    <strong>{formatQty(totals.received)}</strong>
-                  </div>
-                </div>
-                <div className="jod-tablewrap">
-                  <table className="jod-table">
-                    <thead>
-                      <tr>
-                        <th>Item</th>
-                        <th>Vendor</th>
-                        <th>Category</th>
-                        <th>Type</th>
-                        <th className="num">Challans</th>
-                        <th className="num">Order qty</th>
-                        <th className="num">Ready</th>
-                        <th className="num">Pending QC</th>
-                        <th className="num">Dispatch</th>
-                        <th className="num">Rework</th>
-                        <th className="num">Rejected</th>
-                        <th className="num">Received</th>
-                        <th className="num">Balance</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {vendorSummary.map((row) => (
-                        <tr key={row.key}>
-                          <td className="jod-clip" title={`${row.description} (${row.unit})`}>
-                            <span className="jod-item">{row.description}</span>
-                          </td>
-                          <td className="jod-clip" title={row.vendorName}>{row.vendorName}</td>
-                          <td className="jod-clip">
-                            {vendorMaterialCategoryLabel(row.vendorName) || "—"}
-                          </td>
-                          <td className="jod-clip" title={jobTypeLabel(row.jobType)}>
-                            {jobTypeShort(row.jobType)}
-                          </td>
-                          <td className="num">{row.challans}</td>
-                          <td className="num">{formatQty(row.orderQty)}</td>
-                          <td className="num">{formatQty(row.ready)}</td>
-                          <td className="num">{row.pending ? formatQty(row.pending) : "—"}</td>
-                          <td className="num">{row.dispatch ? formatQty(row.dispatch) : "—"}</td>
-                          <td className="num">{row.rework ? formatQty(row.rework) : "—"}</td>
-                          <td className="num">{row.scrap ? formatQty(row.scrap) : "—"}</td>
-                          <td className="num">{formatQty(row.received)}</td>
-                          <td className="num">{formatQty(row.balance)}</td>
-                          <td title={row.statusText}>
-                            <span className="jod-pill">{row.statusText}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      ) : null}
-
       <div className="jod-panel">
         <div className="jod-panel-head">
           <div>
             <h3>
-              {q ? "Matching line details" : activeLabel}
+              {q ? "Matching challans" : activeLabel}
               <span className="pill-count">
-                {filteredLines.length} item{filteredLines.length === 1 ? "" : "s"}
-                {filteredChallanCount > 0
-                  ? ` · ${filteredChallanCount} challan${filteredChallanCount === 1 ? "" : "s"}`
-                  : ""}
+                {filteredChallans.length} challan{filteredChallans.length === 1 ? "" : "s"}
               </span>
             </h3>
           </div>
         </div>
-        <div key={`lines-${panelKey}`} className="jod-panel-body">
+        <div key={`challans-${panelKey}`} className="jod-panel-body">
           {loading ? (
             <div className="jod-empty">Loading…</div>
-          ) : filteredLines.length === 0 ? (
-            <div className="jod-empty">No lines in this view.</div>
+          ) : filteredChallans.length === 0 ? (
+            <div className="jod-empty">No challans in this view.</div>
           ) : (
             <div className="jod-tablewrap">
               <table className="jod-table">
@@ -1434,57 +1297,56 @@ export default function JobOrderDashboard() {
                       selected={colFilters.pipeline}
                       onChange={(v) => setColFilters((f) => ({ ...f, pipeline: v }))}
                     />
-                    <th style={{ textAlign: "right" }}>Action</th>
+                    <th className="jod-act">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredLines.map((line) => {
+                  {filteredChallans.map((row) => {
                     let pill = "";
                     if (
-                      line.pipeline.includes("Awaiting")
-                      || line.pipeline.includes("Rework")
-                      || line.pipeline.includes("Rejected")
+                      row.pipeline.includes("Awaiting")
+                      || row.pipeline.includes("Rework")
+                      || row.pipeline.includes("Rejected")
                     ) pill = "warn";
-                    else if (line.pipeline.includes("QC") || line.pipeline.includes("Partial")) pill = "amber";
-                    else if (line.pipeline.includes("receive") || line.pipeline.includes("dispatch")) pill = "teal";
-                    else if (line.pipeline.includes("complete") || line.pipeline.includes("Fully")) pill = "ok";
+                    else if (row.pipeline.includes("QC") || row.pipeline.includes("Partial")) pill = "amber";
+                    else if (row.pipeline.includes("receive") || row.pipeline.includes("dispatch")) pill = "teal";
+                    else if (row.pipeline.includes("complete") || row.pipeline.includes("Fully")) pill = "ok";
                     const rowTitle = [
-                      line.description,
-                      jobTypeLabel(line.jobType),
-                      line.projectName,
-                      line.process,
+                      jobTypeLabel(row.jobType),
+                      row.itemCount ? `${row.itemCount} item${row.itemCount === 1 ? "" : "s"}` : null,
+                      ...(row.itemNames || []).slice(0, 4),
                     ]
                       .filter(Boolean)
                       .join(" · ");
                     let delayClass = "jod-delay";
-                    if (line.delayDays != null && line.delayDays > 0) delayClass += " jod-delay-late";
-                    else if (line.delayDays != null && line.delayDays < 0) delayClass += " jod-delay-early";
-                    else if (line.delayDays === 0) delayClass += " jod-delay-ok";
+                    if (row.delayDays != null && row.delayDays > 0) delayClass += " jod-delay-late";
+                    else if (row.delayDays != null && row.delayDays < 0) delayClass += " jod-delay-early";
+                    else if (row.delayDays === 0) delayClass += " jod-delay-ok";
                     return (
-                      <tr key={line.key} title={rowTitle}>
-                        <td className="mono jod-clip jod-challan">{line.srNo}</td>
-                        <td className="jod-clip jod-party" title={line.sendFromName}>{line.sendFromName}</td>
-                        <td className="jod-clip jod-party" title={line.sendToName}>{line.sendToName}</td>
-                        <td className="jod-clip jod-date">{line.dcDateLabel}</td>
-                        <td className="jod-clip jod-date">{line.expectedLabel}</td>
-                        <td className="jod-clip jod-date">{line.deliveryLabel}</td>
+                      <tr key={row.key} title={rowTitle}>
+                        <td className="mono jod-clip jod-challan">{row.srNo}</td>
+                        <td className="jod-clip jod-party" title={row.sendFromName}>{row.sendFromName}</td>
+                        <td className="jod-clip jod-party" title={row.sendToName}>{row.sendToName}</td>
+                        <td className="jod-clip jod-date">{row.dcDateLabel}</td>
+                        <td className="jod-clip jod-date">{row.expectedLabel}</td>
+                        <td className="jod-clip jod-date">{row.deliveryLabel}</td>
                         <td className="jod-clip">
-                          {line.delayLabel === "—"
+                          {row.delayLabel === "—"
                             ? "—"
-                            : <span className={delayClass}>{line.delayLabel}</span>}
+                            : <span className={delayClass}>{row.delayLabel}</span>}
                         </td>
-                        <td className="num">{formatQty(line.orderQty)}</td>
-                        <td className="num">{formatQty(line.ready)}</td>
-                        <td className="num">{line.dispatch ? formatQty(line.dispatch) : "—"}</td>
-                        <td className="num">{formatQty(line.received)}</td>
-                        <td className="jod-status" title={line.pipeline}>
-                          <span className={`jod-pill${pill ? ` ${pill}` : ""}`}>{line.pipeline}</span>
+                        <td className="num">{formatQty(row.orderQty)}</td>
+                        <td className="num">{formatQty(row.ready)}</td>
+                        <td className="num">{row.dispatch ? formatQty(row.dispatch) : "—"}</td>
+                        <td className="num">{formatQty(row.received)}</td>
+                        <td className="jod-status" title={row.pipeline}>
+                          <span className={`jod-pill${pill ? ` ${pill}` : ""}`}>{row.pipeline}</span>
                         </td>
                         <td className="jod-act">
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            onClick={() => openOrder(line)}
+                            onClick={() => openOrder(row)}
                           >
                             View
                           </button>

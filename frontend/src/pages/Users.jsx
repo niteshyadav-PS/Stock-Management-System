@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FaEye, FaEyeSlash } from 'react-icons/fa';
-import { getUsers, saveUser, updateUser, deleteUser, recordUserPassword, unwrapList } from '../api/api';
+import { getUsers, getJobOrderVendors, saveUser, updateUser, deleteUser, recordUserPassword, unwrapList } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_LABELS } from '../utils/helpers';
 import Pagination from '../components/Pagination';
 import useClientPagination from '../hooks/useClientPagination';
-import { jobTypeLabel, vendorNamesForJobType } from '../utils/jobOrderVendors';
+import { jobTypeLabel, setJobOrderVendorsCache, vendorNamesForJobType } from '../utils/jobOrderVendors';
 
 const EMPTY = {
   name: '',
@@ -40,10 +40,31 @@ export default function Users() {
   const [otherVendor, setOtherVendor] = useState(false);
   const [listFilter, setListFilter] = useState('all');
 
+  const [vendorRev, setVendorRev] = useState(0);
+
   const load = useCallback(async () => {
     try { setUsers(unwrapList(await getUsers())); } catch {}
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = unwrapList(await getJobOrderVendors({ active: 'true' }));
+        setJobOrderVendorsCache(rows);
+        if (alive) setVendorRev((n) => n + 1);
+      } catch {
+        /* keep fallback presets */
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const vendorNameOptions = useMemo(
+    () => vendorNamesForJobType(form.vendorJobType || 'powder_coating'),
+    [form.vendorJobType, vendorRev],
+  );
 
   const filteredUsers = users.filter((u) => {
     if (listFilter === 'all') return true;
@@ -276,7 +297,7 @@ export default function Users() {
                     }}
                   >
                     <option value="">Select company…</option>
-                    {vendorNamesForJobType(form.vendorJobType || 'powder_coating').map(name => (
+                    {vendorNameOptions.map(name => (
                       <option key={name} value={name}>{name}</option>
                     ))}
                     <option value="__other__">Other (type company name)</option>

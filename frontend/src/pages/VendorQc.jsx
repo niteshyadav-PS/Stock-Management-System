@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
-import { acknowledgeJobOrder, getJobOrders, unwrapList, updateJobOrderQcStage } from "../api/api";
+import { acknowledgeJobOrder, getJobOrders, getJobOrderVendors, unwrapList, updateJobOrderQcStage } from "../api/api";
 import { useAuth } from "../context/AuthContext";
 import { todayStr } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
-import { vendorNamesForJobType } from "../utils/jobOrderVendors";
+import { setJobOrderVendorsCache, vendorNamesForJobType } from "../utils/jobOrderVendors";
 
 function isVendorAcknowledged(order) {
   return !!String(order?.vendorExpectedDate || "").trim();
@@ -164,6 +164,23 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
   const [qcDialogErr, setQcDialogErr] = useState("");
   const [qcDialogBusy, setQcDialogBusy] = useState(false);
   const [bulkDrafts, setBulkDrafts] = useState({}); // check_all / vendor_update_all drafts by itemIndex
+  const [vendorRev, setVendorRev] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = unwrapList(await getJobOrderVendors({ active: "true" }));
+        setJobOrderVendorsCache(rows);
+        if (alive) setVendorRev((n) => n + 1);
+      } catch {
+        /* keep fallback presets */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (lockedJobType) setTypeFilter(lockedJobType);
@@ -467,7 +484,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
     return [...map.values()].sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: "base" }),
     );
-  }, [orders, lockedJobType, typeFilter]);
+  }, [orders, lockedJobType, typeFilter, vendorRev]);
 
   useEffect(() => {
     if (

@@ -18,10 +18,13 @@ import JobOrder from './pages/JobOrder';
 import VendorQc from './pages/VendorQc';
 import VendorDashboard from './pages/VendorDashboard';
 import JobOrderDashboard from './pages/JobOrderDashboard';
+import VendorMaster from './pages/VendorMaster';
+import JobOrderReport from './pages/JobOrderReport';
 
 const ROLE_ACCESS = {
   dashboard: ["admin", "store", "store_manager", "purchase", "vendor"],
   master: ["admin", "purchase", "viewer"],
+  vendorMaster: ["admin", "purchase"],
   inward: ["admin", "store", "store_manager"],
   outward: ["admin", "store", "store_manager"],
   price: ["admin", "purchase"],
@@ -33,6 +36,7 @@ const ROLE_ACCESS = {
   poMatching: ["admin", "purchase", "store", "store_manager"],
   jobOrders: ['admin', 'store_manager', 'store', 'viewer', 'purchase', 'vendor', 'quality'],
   jobOrderDashboard: ['admin', 'store_manager', 'store', 'viewer', 'purchase', 'quality'],
+  jobOrderReport: ['admin', 'store_manager', 'store', 'viewer', 'purchase', 'quality'],
 };
 
 function getDefaultPath(role) {
@@ -136,6 +140,14 @@ function AppRoutes() {
           }
         />
         <Route
+          path="/vendor-master"
+          element={
+            <ProtectedRoute page="vendorMaster">
+              <VendorMaster />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/inward"
           element={
             <ProtectedRoute page="inward">
@@ -212,6 +224,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute page="jobOrderDashboard">
               <JobOrderDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/job-orders/report"
+          element={
+            <ProtectedRoute page="jobOrderReport">
+              <JobOrderReport />
             </ProtectedRoute>
           }
         />

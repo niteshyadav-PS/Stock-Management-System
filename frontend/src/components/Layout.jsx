@@ -35,6 +35,11 @@ const NAV_SECTIONS = [
         roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
       },
       {
+        label: "Job Order Report",
+        path: "/job-orders/report",
+        roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
+      },
+      {
         label: "Powder Coating",
         path: "/job-orders",
         roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
@@ -43,6 +48,11 @@ const NAV_SECTIONS = [
         label: "Fabrication",
         path: "/job-orders/fabrication",
         roles: ["admin", "store_manager", "store", "viewer", "purchase", "quality"],
+      },
+      {
+        label: "Vendor Master",
+        path: "/vendor-master",
+        roles: ["admin", "purchase"],
       },
       {
         label: "My Job Orders",

@@ -194,3 +194,18 @@ export const updateJobOrderQcStage = (id, data) =>
 
 export const acknowledgeJobOrder = (id, data) =>
   client.patch(`/job-orders/${id}/vendor-ack`, data);
+
+// ── Job-order vendors (powder coating / fabrication master) ───────────────────
+export const getJobOrderVendors = (params) =>
+  client.get(withQuery("/job-order-vendors", params || {}));
+
+export const addJobOrderVendor = (data) =>
+  client.post("/job-order-vendors", data);
+
+export const updateJobOrderVendor = (id, data) =>
+  client.put(`/job-order-vendors/${id}`, data);
+
+export const deleteJobOrderVendor = (id, hard = false) =>
+  client.delete(
+    hard ? `/job-order-vendors/${id}?hard=1` : `/job-order-vendors/${id}`,
+  );
