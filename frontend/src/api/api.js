@@ -31,18 +31,21 @@ client.interceptors.response.use(
     const message = err.response?.data?.error || err.message;
 
     // Token expired or invalid → clear storage and reload to login
+    // Public embed pages must not be bounced to /login.
     if (status === 401) {
-      sessionStorage.removeItem("sy_token");
-      sessionStorage.removeItem("sy_user");
-      try {
-        localStorage.removeItem("sy_token");
-        localStorage.removeItem("sy_user");
-      } catch {
-        /* ignore */
-      }
-      // Only redirect if not already on login page
-      if (!window.location.pathname.includes("/login")) {
-        window.location.href = "/login";
+      const onEmbed = window.location.pathname.includes("/embed/");
+      if (!onEmbed) {
+        sessionStorage.removeItem("sy_token");
+        sessionStorage.removeItem("sy_user");
+        try {
+          localStorage.removeItem("sy_token");
+          localStorage.removeItem("sy_user");
+        } catch {
+          /* ignore */
+        }
+        if (!window.location.pathname.includes("/login")) {
+          window.location.href = "/login";
+        }
       }
     }
 
@@ -116,6 +119,13 @@ export const getOutward = (params) => client.get(withQuery("/outward", params ||
 
 export const getStockSummary = () => client.get("/stock/summary");
 export const getReceivedByPo = () => client.get("/stock/received-by-po");
+
+// Public Live Stock embed (optional key if EMBED_STOCK_TOKEN is set on server)
+export const getEmbedStockSummary = (key) =>
+  client.get(withQuery("/embed/stock-summary", key ? { key } : {}));
+export const getEmbedMaster = (key) =>
+  client.get(withQuery("/embed/master", key ? { key } : {}));
+
 export const addOutward = (data) => client.post("/outward", data);
 export const bulkOutward = (entries) =>
   client.post("/outward/bulk", { entries });

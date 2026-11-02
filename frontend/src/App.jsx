@@ -20,6 +20,7 @@ import VendorDashboard from './pages/VendorDashboard';
 import JobOrderDashboard from './pages/JobOrderDashboard';
 import VendorMaster from './pages/VendorMaster';
 import JobOrderReport from './pages/JobOrderReport';
+import EmbedLiveStock from './pages/EmbedLiveStock';
 
 const ROLE_ACCESS = {
   dashboard: ["admin", "store", "store_manager", "purchase", "vendor"],
@@ -96,6 +97,8 @@ function AppRoutes() {
         path="/login"
         element={user ? <Navigate to={defaultPath} replace /> : <Login />}
       />
+      {/* Public Live Stock for screens / iframe — no login */}
+      <Route path="/embed/stock" element={<EmbedLiveStock />} />
       <Route element={<Layout />}>
         <Route
           path="/dashboard/admin"

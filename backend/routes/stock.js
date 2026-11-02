@@ -19,109 +19,113 @@ function isoDaysAgo(days) {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+async function buildStockSummary() {
+  const since = isoDaysAgo(13);
+  const [inGroups, outGroups, pendingPriceCount, trendGroups] = await Promise.all([
+    Inward.aggregate([
+      { $match: { name: { $nin: [null, ''] } } },
+      {
+        $group: {
+          _id: nameKey,
+          name: { $first: '$name' },
+          inQty: { $sum: qtyNum },
+          inValue: {
+            $sum: {
+              $cond: [{ $gt: [priceNum, 0] }, { $multiply: [qtyNum, priceNum] }, 0],
+            },
+          },
+          pricedQty: {
+            $sum: { $cond: [{ $gt: [priceNum, 0] }, qtyNum, 0] },
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]).option({ maxTimeMS: 20000 }),
+    Outward.aggregate([
+      { $match: { name: { $nin: [null, ''] } } },
+      {
+        $group: {
+          _id: nameKey,
+          name: { $first: '$name' },
+          outQty: { $sum: qtyNum },
+          count: { $sum: 1 },
+        },
+      },
+    ]).option({ maxTimeMS: 20000 }),
+    Inward.countDocuments({
+      $or: [{ price: { $exists: false } }, { price: null }, { price: 0 }],
+    }),
+    Inward.aggregate([
+      { $match: { date: { $gte: since } } },
+      { $group: { _id: '$date', qty: { $sum: { $ifNull: ['$qty', 0] } } } },
+    ]).option({ maxTimeMS: 20000 }),
+  ]);
+
+  const byKey = new Map();
+  let inQty = 0;
+  let outQty = 0;
+  let inValue = 0;
+  let inwardCount = 0;
+  let outwardCount = 0;
+
+  for (const row of inGroups) {
+    const key = row._id || '';
+    if (!key) continue;
+    byKey.set(key, {
+      key,
+      name: row.name || key,
+      inQty: row.inQty || 0,
+      outQty: 0,
+      inValue: row.inValue || 0,
+      pricedQty: row.pricedQty || 0,
+    });
+    inQty += row.inQty || 0;
+    inValue += row.inValue || 0;
+    inwardCount += row.count || 0;
+  }
+  for (const row of outGroups) {
+    const key = row._id || '';
+    if (!key) continue;
+    const prev = byKey.get(key) || {
+      key,
+      name: row.name || key,
+      inQty: 0,
+      outQty: 0,
+      inValue: 0,
+      pricedQty: 0,
+    };
+    prev.outQty = row.outQty || 0;
+    if (!prev.name) prev.name = row.name || key;
+    byKey.set(key, prev);
+    outQty += row.outQty || 0;
+    outwardCount += row.count || 0;
+  }
+
+  const trendMap = new Map(trendGroups.map((t) => [t._id, t.qty || 0]));
+  const trend = [];
+  for (let i = 13; i >= 0; i -= 1) {
+    const date = isoDaysAgo(i);
+    trend.push({ date, qty: trendMap.get(date) || 0 });
+  }
+
+  return {
+    totals: {
+      inQty,
+      outQty,
+      inValue,
+      inwardCount,
+      outwardCount,
+      pendingPriceCount: pendingPriceCount || 0,
+    },
+    items: [...byKey.values()],
+    trend,
+  };
+}
+
 // Totals grouped by material. A few hundred rows instead of every transaction.
 router.get('/summary', authMiddleware, async (req, res) => {
   try {
-    const since = isoDaysAgo(13);
-    const [inGroups, outGroups, pendingPriceCount, trendGroups] = await Promise.all([
-      Inward.aggregate([
-        { $match: { name: { $nin: [null, ''] } } },
-        {
-          $group: {
-            _id: nameKey,
-            name: { $first: '$name' },
-            inQty: { $sum: qtyNum },
-            inValue: {
-              $sum: {
-                $cond: [{ $gt: [priceNum, 0] }, { $multiply: [qtyNum, priceNum] }, 0],
-              },
-            },
-            pricedQty: {
-              $sum: { $cond: [{ $gt: [priceNum, 0] }, qtyNum, 0] },
-            },
-            count: { $sum: 1 },
-          },
-        },
-      ]).option({ maxTimeMS: 20000 }),
-      Outward.aggregate([
-        { $match: { name: { $nin: [null, ''] } } },
-        {
-          $group: {
-            _id: nameKey,
-            name: { $first: '$name' },
-            outQty: { $sum: qtyNum },
-            count: { $sum: 1 },
-          },
-        },
-      ]).option({ maxTimeMS: 20000 }),
-      Inward.countDocuments({
-        $or: [{ price: { $exists: false } }, { price: null }, { price: 0 }],
-      }),
-      Inward.aggregate([
-        { $match: { date: { $gte: since } } },
-        { $group: { _id: '$date', qty: { $sum: { $ifNull: ['$qty', 0] } } } },
-      ]).option({ maxTimeMS: 20000 }),
-    ]);
-
-    const byKey = new Map();
-    let inQty = 0;
-    let outQty = 0;
-    let inValue = 0;
-    let inwardCount = 0;
-    let outwardCount = 0;
-
-    for (const row of inGroups) {
-      const key = row._id || '';
-      if (!key) continue;
-      byKey.set(key, {
-        key,
-        name: row.name || key,
-        inQty: row.inQty || 0,
-        outQty: 0,
-        inValue: row.inValue || 0,
-        pricedQty: row.pricedQty || 0,
-      });
-      inQty += row.inQty || 0;
-      inValue += row.inValue || 0;
-      inwardCount += row.count || 0;
-    }
-    for (const row of outGroups) {
-      const key = row._id || '';
-      if (!key) continue;
-      const prev = byKey.get(key) || {
-        key,
-        name: row.name || key,
-        inQty: 0,
-        outQty: 0,
-        inValue: 0,
-        pricedQty: 0,
-      };
-      prev.outQty = row.outQty || 0;
-      if (!prev.name) prev.name = row.name || key;
-      byKey.set(key, prev);
-      outQty += row.outQty || 0;
-      outwardCount += row.count || 0;
-    }
-
-    const trendMap = new Map(trendGroups.map((t) => [t._id, t.qty || 0]));
-    const trend = [];
-    for (let i = 13; i >= 0; i -= 1) {
-      const date = isoDaysAgo(i);
-      trend.push({ date, qty: trendMap.get(date) || 0 });
-    }
-
-    res.json({
-      totals: {
-        inQty,
-        outQty,
-        inValue,
-        inwardCount,
-        outwardCount,
-        pendingPriceCount: pendingPriceCount || 0,
-      },
-      items: [...byKey.values()],
-      trend,
-    });
+    res.json(await buildStockSummary());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -154,3 +158,4 @@ router.get('/received-by-po', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.buildStockSummary = buildStockSummary;

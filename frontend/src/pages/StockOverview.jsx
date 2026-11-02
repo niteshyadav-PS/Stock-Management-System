@@ -524,7 +524,24 @@ export default function StockOverview() {
           <p>
             Monitor current stock availability with real-time balances
             calculated from inward and outward transactions.
-          </p>{" "}
+          </p>
+          <div className="stock-public-link">
+            <span>Public display link (no login):</span>
+            <code>{`${window.location.origin}/embed/stock`}</code>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                const url = `${window.location.origin}/embed/stock`;
+                if (navigator.clipboard?.writeText) {
+                  navigator.clipboard.writeText(url).catch(() => {});
+                }
+                window.open(url, "_blank", "noopener,noreferrer");
+              }}
+            >
+              Open / copy
+            </button>
+          </div>
         </div>
       </div>
 
