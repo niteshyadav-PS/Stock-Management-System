@@ -127,7 +127,7 @@ const KNOWN_VENDORS = [
   "Arrow International",
   "Ashish International",
   "Bhartee Industries",
-  "Devesh Enterprises",
+  "Devesh Engineering",
   "Divine Industries",
   "Fischer Building Materials India Private Limited",
   "Industrial House",
