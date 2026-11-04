@@ -521,28 +521,21 @@ export default function StockOverview() {
       <div className="pagehead">
         <div className="pagehead-text">
           <h2>Live Stock</h2>
-          <p>
-            Monitor current stock availability with real-time balances
-            calculated from inward and outward transactions.
-          </p>
-          <div className="stock-public-link">
-            <span>Public display link (no login):</span>
-            <code>{`${window.location.origin}/embed/stock`}</code>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => {
-                const url = `${window.location.origin}/embed/stock`;
-                if (navigator.clipboard?.writeText) {
-                  navigator.clipboard.writeText(url).catch(() => {});
-                }
-                window.open(url, "_blank", "noopener,noreferrer");
-              }}
-            >
-              Open / copy
-            </button>
-          </div>
+<p>Monitor current stock availability with real-time balances calculated from inward and outward transactions.</p>
         </div>
+        <button
+          type="button"
+          className="btn btn-in btn-sm"
+          onClick={() => {
+            window.open(
+              `${window.location.origin}/embed/stock`,
+              "_blank",
+              "noopener,noreferrer",
+            );
+          }}
+        >
+          Open
+        </button>
       </div>
 
       {/* ── Stat cards ── */}
