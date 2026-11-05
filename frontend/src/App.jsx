@@ -19,6 +19,7 @@ import VendorQc from './pages/VendorQc';
 import VendorDashboard from './pages/VendorDashboard';
 import JobOrderDashboard from './pages/JobOrderDashboard';
 import VendorMaster from './pages/VendorMaster';
+import InwardVendorMaster from './pages/InwardVendorMaster';
 import JobOrderReport from './pages/JobOrderReport';
 import EmbedLiveStock from './pages/EmbedLiveStock';
 
@@ -26,6 +27,7 @@ const ROLE_ACCESS = {
   dashboard: ["admin", "store", "store_manager", "purchase", "vendor"],
   master: ["admin", "purchase", "viewer"],
   vendorMaster: ["admin", "purchase"],
+  inwardVendorMaster: ["admin", "purchase"],
   inward: ["admin", "store", "store_manager"],
   outward: ["admin", "store", "store_manager"],
   price: ["admin", "purchase"],
@@ -147,6 +149,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute page="vendorMaster">
               <VendorMaster />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/inward-vendor-master"
+          element={
+            <ProtectedRoute page="inwardVendorMaster">
+              <InwardVendorMaster />
             </ProtectedRoute>
           }
         />

@@ -138,6 +138,11 @@ const NAV_SECTIONS = [
         path: "/master",
         roles: ["admin", "purchase", "viewer"],
       },
+      {
+        label: "Inward Vendor Master",
+        path: "/inward-vendor-master",
+        roles: ["admin", "purchase"],
+      },
       { label: "Price Entry", path: "/price", roles: ["admin", "purchase"] },
       {
         label: "Purchase Orders",

@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   getMaster,
   getInward,
+  getInwardVendors,
   addInward,
   bulkInward,
   updateInward,
@@ -248,7 +249,7 @@ const KNOWN_VENDORS = [
   "Y Equipment Services Private Limited",
 ];
 
-const VENDOR_DROPDOWN = [...KNOWN_VENDORS].sort((a, b) =>
+const FALLBACK_VENDOR_DROPDOWN = [...KNOWN_VENDORS].sort((a, b) =>
   a.localeCompare(b, "en", { sensitivity: "base" }),
 );
 
@@ -828,6 +829,7 @@ export default function InwardEntry() {
 
   const [master, setMaster] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [vendorMasterNames, setVendorMasterNames] = useState([]);
   const [poList, setPoList] = useState([]);
   const [poSearch, setPoSearch] = useState("");
   const [poDropdownOpen, setPoDropdownOpen] = useState(false);
@@ -1013,8 +1015,33 @@ export default function InwardEntry() {
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredEntries, 25);
 
+  // Active names from Inward Vendor Master (fallback to hardcoded list)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = unwrapList(await getInwardVendors({ active: "true" }));
+        const names = rows
+          .map((v) => String(v.name || "").trim())
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+        if (alive && names.length) setVendorMasterNames(names);
+      } catch {
+        /* keep FALLBACK_VENDOR_DROPDOWN */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const vendorNames = useMemo(
+    () =>
+      vendorMasterNames.length ? vendorMasterNames : FALLBACK_VENDOR_DROPDOWN,
+    [vendorMasterNames],
+  );
+
   // ── PO search/filter for the searchable PO Number field ───────────────
-  const vendorNames = VENDOR_DROPDOWN;
 
   const filteredPoList = useMemo(() => {
     const q = poSearch.trim().toLowerCase();

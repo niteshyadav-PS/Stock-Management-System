@@ -219,3 +219,17 @@ export const deleteJobOrderVendor = (id, hard = false) =>
   client.delete(
     hard ? `/job-order-vendors/${id}?hard=1` : `/job-order-vendors/${id}`,
   );
+
+// ── Inward vendors (supplier master for inward entry) ─────────────────────────
+export const getInwardVendors = (params) =>
+  client.get(withQuery("/inward-vendors", params || {}));
+
+export const addInwardVendor = (data) => client.post("/inward-vendors", data);
+
+export const updateInwardVendor = (id, data) =>
+  client.put(`/inward-vendors/${id}`, data);
+
+export const deleteInwardVendor = (id, hard = false) =>
+  client.delete(
+    hard ? `/inward-vendors/${id}?hard=1` : `/inward-vendors/${id}`,
+  );

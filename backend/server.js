@@ -100,6 +100,7 @@ app.use('/api/purchase-requests', require('./routes/purchaseRequests'));
 app.use('/api/purchase-orders',   require('./routes/purchaseOrders'));
 app.use('/api/job-orders', require('./routes/jobOrders'));
 app.use('/api/job-order-vendors', require('./routes/jobOrderVendors'));
+app.use('/api/inward-vendors', require('./routes/inwardVendors'));
 app.use('/api/embed', require('./routes/embed'));
 
 // ── 404 handler for unknown routes ───────────────────────────────────────────
