@@ -212,6 +212,9 @@ export const updateJobOrderQcStage = (id, data) =>
 export const acknowledgeJobOrder = (id, data) =>
   client.patch(`/job-orders/${id}/vendor-ack`, data);
 
+export const receiveJobOrder = (id, data) =>
+  client.patch(`/job-orders/${id}/receive`, data);
+
 // ── Job-order vendors (powder coating / fabrication master) ───────────────────
 export const getJobOrderVendors = (params) =>
   client.get(withQuery("/job-order-vendors", params || {}));

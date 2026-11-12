@@ -1,13 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getJobOrders, unwrapList } from "../api/api";
+import {
+  getJobOrder,
+  getJobOrders,
+  receiveJobOrder,
+  unwrapList,
+} from "../api/api";
 import { ThFilter } from "../components/ColFilter";
-import { JobOrderViewModal } from "./JobOrder";
+import { useAuth } from "../context/AuthContext";
+import { JobOrderReceiveModal, JobOrderViewModal } from "./JobOrder";
 import {
   VENDOR_MATERIAL_CATEGORIES,
   vendorMaterialCategory,
   vendorMaterialCategoryLabel,
 } from "../utils/jobOrderVendors";
+
+const RECEIVE_ROLES = ["admin", "store_manager", "store", "purchase", "viewer"];
 
 const EMPTY_COL_FILTERS = {
   challan: [],
@@ -378,6 +386,8 @@ const KPI_CARDS = [
 
 export default function JobOrderDashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canReceive = RECEIVE_ROLES.includes(user?.role);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -389,6 +399,8 @@ export default function JobOrderDashboard() {
   const [colFilters, setColFilters] = useState(EMPTY_COL_FILTERS);
   const [panelKey, setPanelKey] = useState(0);
   const [viewOrder, setViewOrder] = useState(null);
+  const [receiveOrder, setReceiveOrder] = useState(null);
+  const [receiveOpening, setReceiveOpening] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -672,6 +684,50 @@ export default function JobOrderDashboard() {
       status: line.orderStatus,
       items: [],
     });
+  }
+
+  async function openReceive(line) {
+    if (!canReceive || receiveOpening) return;
+    setReceiveOpening(true);
+    setErr("");
+    try {
+      const found = orders.find((o) => String(o._id) === String(line.orderId));
+      const full = await getJobOrder(line.orderId);
+      setReceiveOrder(full || found);
+    } catch (e) {
+      const found = orders.find((o) => String(o._id) === String(line.orderId));
+      if (found) {
+        setReceiveOrder(found);
+      } else {
+        setErr(e.message || "Could not open receive dialog");
+      }
+    } finally {
+      setReceiveOpening(false);
+    }
+  }
+
+  async function handleReceive({
+    items,
+    receivedBy,
+    challanNo,
+    receivedDate,
+    note,
+  }) {
+    const order = receiveOrder;
+    if (!order?._id) {
+      throw new Error(
+        "No order selected — please close and reopen the receive dialog.",
+      );
+    }
+    await receiveJobOrder(order._id, {
+      items,
+      receivedBy,
+      challanNo,
+      receivedDate,
+      note,
+    });
+    setReceiveOrder(null);
+    await load();
   }
 
   const activeLabel =
@@ -1082,6 +1138,14 @@ export default function JobOrderDashboard() {
         .jod-table td.jod-act {
           text-align: right;
           padding-right: 10px;
+          white-space: nowrap;
+        }
+        .jod-act-btns {
+          display: inline-flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 6px;
+          flex-wrap: wrap;
         }
         @media (max-width: 1100px) {
           .jod-toolbar {
@@ -1134,6 +1198,13 @@ export default function JobOrderDashboard() {
         <JobOrderViewModal
           order={viewOrder}
           onClose={() => setViewOrder(null)}
+        />
+      )}
+      {receiveOrder && (
+        <JobOrderReceiveModal
+          order={receiveOrder}
+          onSave={handleReceive}
+          onClose={() => setReceiveOrder(null)}
         />
       )}
 
@@ -1481,13 +1552,26 @@ export default function JobOrderDashboard() {
                           <span className={`jod-pill${pill ? ` ${pill}` : ""}`}>{line.pipeline}</span>
                         </td>
                         <td className="jod-act">
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => openOrder(line)}
-                          >
-                            View
-                          </button>
+                          <div className="jod-act-btns">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => openOrder(line)}
+                            >
+                              View
+                            </button>
+                            {canReceive && line.receivable > 0.0001 && (
+                              <button
+                                type="button"
+                                className="btn btn-in btn-sm"
+                                disabled={receiveOpening}
+                                onClick={() => openReceive(line)}
+                                title="Receive ready material at store"
+                              >
+                                Receive
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

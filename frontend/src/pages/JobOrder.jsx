@@ -2748,6 +2748,180 @@ export function JobOrderViewModal({ order, onClose, onEdit }) {
   return <ViewModal order={order} onClose={onClose} onEdit={onEdit} />;
 }
 
+/** Same receive dialog as Job Order list — usable from Job Order Dashboard. */
+export function JobOrderReceiveModal({ order, onSave, onClose }) {
+  return <ReceiveModal order={order} onSave={onSave} onClose={onClose} />;
+}
+
+const RECEIVE_MODAL_HOST_STYLE = `
+  .jo-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(28, 26, 22, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .jo-modal-overlay--high { z-index: 1100; }
+  .jo-modal-panel {
+    background: var(--card, #fff);
+    border: 1px solid var(--line, #e4e0d8);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: var(--shadow-lg, 0 18px 50px rgba(28, 26, 22, 0.18));
+    width: 100%;
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .jo-modal-panel--md { max-width: 720px; }
+  .jo-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line, #e4e0d8);
+    flex-shrink: 0;
+  }
+  .jo-modal-header-text { min-width: 0; flex: 1; }
+  .jo-modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    color: #8a8270;
+    padding: 4px 8px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .jo-modal-form {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+  }
+  .jo-modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
+  .jo-receive-hint {
+    margin-bottom: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #8a8270;
+    line-height: 1.4;
+  }
+  .jo-receive-all-loc {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--line, #e4e0d8);
+    border-radius: 8px;
+    background: var(--paper-dim, #f7f5f0);
+  }
+  .jo-receive-all-loc-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #8a8270;
+    margin-bottom: 8px;
+  }
+  .jo-receive-all-loc-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .jo-receive-all-loc-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-2, #6b6555);
+    line-height: 1.4;
+  }
+  .jo-receive-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.9fr);
+    gap: 12px 16px;
+    align-items: start;
+    padding: 12px;
+    border: 1px solid var(--line, #e4e0d8);
+    border-radius: 8px;
+    overflow: visible;
+  }
+  .jo-receive-main { min-width: 0; }
+  .jo-receive-title { font-weight: 600; font-size: 13px; }
+  .jo-receive-sub { font-size: 11px; color: #8a8270; margin-top: 2px; }
+  .jo-receive-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #8a8270;
+  }
+  .jo-receive-stats strong { color: var(--ink, #1c1a16); }
+  .jo-receive-stats strong.is-open { color: var(--rust-dark, #9a3412); }
+  .jo-receive-stats strong.is-done { color: var(--teal-dark, #16483f); }
+  .jo-receive-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #9a3412;
+    line-height: 1.35;
+  }
+  .jo-receive-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    min-width: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .jo-receive-controls .field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-3, #8a8270);
+    margin-bottom: 3px;
+  }
+  .jo-receive-controls input,
+  .jo-receive-controls select {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 34px;
+    pointer-events: auto;
+  }
+  .jo-receive-controls select:disabled,
+  .jo-receive-controls input:disabled {
+    background: var(--paper-dim, #f7f5f0);
+    color: var(--text-3, #8a8270);
+    cursor: not-allowed;
+  }
+  .jo-receive-site { grid-column: 1 / -1; }
+  @media (max-width: 900px) {
+    .jo-receive-row { grid-template-columns: 1fr; }
+    .jo-receive-controls { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    .jo-modal-overlay { padding: 0; }
+    .jo-modal-panel {
+      max-height: 100vh;
+      min-height: 100vh;
+      border-radius: 0;
+    }
+  }
+`;
+
 function ViewModal({ order, onClose, onEdit }) {
   const [detail, setDetail] = useState(order);
 
@@ -3455,6 +3629,7 @@ function ReceiveModal({ order, onSave, onClose }) {
 
   return (
     <div className="jo-modal-overlay jo-modal-overlay--high">
+      <style>{RECEIVE_MODAL_HOST_STYLE}</style>
       <div
         className="jo-modal-panel jo-modal-panel--md"
         role="dialog"
