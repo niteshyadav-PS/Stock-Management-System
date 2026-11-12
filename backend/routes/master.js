@@ -143,4 +143,121 @@ router.delete('/:id', authMiddleware, requireRole('admin','purchase'), async (re
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/**
+ * Distinct material names used on Inward + Outward (for fixing past renames).
+ * GET /api/master/stock-name-values
+ */
+router.get(
+  '/stock-name-values',
+  authMiddleware,
+  requireRole('admin', 'purchase'),
+  async (req, res) => {
+    try {
+      const [inGroups, outGroups] = await Promise.all([
+        Inward.aggregate([
+          { $match: { name: { $nin: [null, ''] } } },
+          { $group: { _id: '$name', count: { $sum: 1 } } },
+        ]).option({ maxTimeMS: 20000 }),
+        Outward.aggregate([
+          { $match: { name: { $nin: [null, ''] } } },
+          { $group: { _id: '$name', count: { $sum: 1 } } },
+        ]).option({ maxTimeMS: 20000 }),
+      ]);
+
+      const map = new Map();
+      for (const row of inGroups) {
+        const value = String(row._id || '').trim();
+        if (!value) continue;
+        const prev = map.get(value) || { value, count: 0 };
+        prev.count += row.count || 0;
+        map.set(value, prev);
+      }
+      for (const row of outGroups) {
+        const value = String(row._id || '').trim();
+        if (!value) continue;
+        const prev = map.get(value) || { value, count: 0 };
+        prev.count += row.count || 0;
+        map.set(value, prev);
+      }
+
+      const values = [...map.values()].sort(
+        (a, b) => b.count - a.count || a.value.localeCompare(b.value),
+      );
+      res.json({ values });
+    } catch (err) {
+      console.error('[master GET /stock-name-values] ', err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+/**
+ * Merge old material spellings on Inward + Outward into the name used in Item Master.
+ * Use this for renames done before cascade sync existed.
+ * POST /api/master/rename-stock-names  { from: string[], to: string }
+ */
+router.post(
+  '/rename-stock-names',
+  authMiddleware,
+  requireRole('admin', 'purchase'),
+  async (req, res) => {
+    try {
+      const to = String(req.body.to || '').trim().replace(/\s+/g, ' ');
+      if (!to) return res.status(400).json({ error: 'Enter the name to use.' });
+
+      const from = [
+        ...new Set(
+          (Array.isArray(req.body.from) ? req.body.from : [])
+            .map((value) => String(value ?? '').trim().replace(/\s+/g, ' '))
+            .filter((value) => value && value.toLowerCase() !== to.toLowerCase()),
+        ),
+      ];
+      if (!from.length) {
+        return res.status(400).json({ error: 'Select at least one name to change.' });
+      }
+      if (from.length > 200) {
+        return res.status(400).json({ error: 'Select fewer names at once.' });
+      }
+
+      const fromRegexes = from.map(
+        (name) => new RegExp(`^${escapeRegExp(name)}$`, 'i'),
+      );
+      const match = { name: { $in: fromRegexes } };
+
+      // Prefer master metadata for the target name when it exists.
+      const masterRow = await Material.findOne(nameMatchFilter(to)).lean();
+      const syncFields = {
+        name: to,
+        type: masterRow?.type || '',
+        code: masterRow?.code || '',
+        category: masterRow?.category || '',
+        uom: masterRow?.uom || '',
+      };
+      // If target is not in master yet, only change the name string.
+      if (!masterRow) {
+        delete syncFields.type;
+        delete syncFields.code;
+        delete syncFields.category;
+        delete syncFields.uom;
+      }
+
+      const [inRes, outRes] = await Promise.all([
+        Inward.updateMany(match, { $set: syncFields }),
+        Outward.updateMany(match, { $set: syncFields }),
+      ]);
+
+      res.json({
+        updated:
+          (inRes.modifiedCount || 0) + (outRes.modifiedCount || 0),
+        inwardUpdated: inRes.modifiedCount || 0,
+        outwardUpdated: outRes.modifiedCount || 0,
+        to,
+      });
+    } catch (err) {
+      console.error('[master POST /rename-stock-names] ', err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 module.exports = router;

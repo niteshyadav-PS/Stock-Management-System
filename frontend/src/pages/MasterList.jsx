@@ -5,12 +5,15 @@ import {
   updateMaterial,
   bulkMaster,
   deleteMaterial,
+  getStockMaterialNameValues,
+  renameStockMaterialNames,
   unwrapList,
 } from "../api/api";
 import { useAuth } from "../context/AuthContext";
 import { readSheetFile, pickCol, exportXlsx } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
+import RenameFieldNames from "../components/RenameFieldNames";
 
 const EMPTY = {
   name: "",
@@ -21,6 +24,8 @@ const EMPTY = {
   minStock: "",
 };
 
+const STOCK_NAME_FIELDS = [{ key: "name", label: "Material name" }];
+
 export default function MasterList() {
   const { user } = useAuth();
   const [list, setList] = useState([]);
@@ -29,9 +34,11 @@ export default function MasterList() {
   const [editingId, setEditingId] = useState(null);
   const [msg, setMsg] = useState({ text: "", ok: true });
   const [uploadMsg, setUploadMsg] = useState({ text: "", ok: true });
+  const [renameOpen, setRenameOpen] = useState(false);
   const isViewerOnly = user?.role === "viewer";
   const isAdmin = user?.role === "admin";
   const isPurchase = user?.role === "purchase";
+  const canFixPastNames = isAdmin || isPurchase;
 
   const load = useCallback(async () => {
     try {
@@ -241,7 +248,31 @@ const categoryOptions = useMemo(
             and outward entry.
           </p>
         </div>
+        {canFixPastNames && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setRenameOpen(true)}
+          >
+            Fix past names
+          </button>
+        )}
       </div>
+
+      {canFixPastNames && renameOpen && (
+        <RenameFieldNames
+          onClose={() => setRenameOpen(false)}
+          onRenamed={load}
+          fields={STOCK_NAME_FIELDS}
+          loadValues={() => getStockMaterialNameValues()}
+          renameValues={(_field, from, to) =>
+            renameStockMaterialNames(from, to)
+          }
+          entityLabel="stock entry"
+          entityLabelPlural="stock entries"
+          confirmExtra="Inward and outward rows with the old name will be updated to match Item Master."
+        />
+      )}
 
       {!isViewerOnly && (
         <>

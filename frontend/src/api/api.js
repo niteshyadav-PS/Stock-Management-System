@@ -101,6 +101,13 @@ export const bulkMaster = (materials) =>
   client.post("/master/bulk", { materials });
 export const deleteMaterial = (id) => client.delete(`/master/${id}`);
 
+/** Past material names on inward+outward (for fixing renames done before sync). */
+export const getStockMaterialNameValues = () =>
+  client.get("/master/stock-name-values");
+
+export const renameStockMaterialNames = (from, to) =>
+  client.post("/master/rename-stock-names", { from, to });
+
 // ── Inward ────────────────────────────────────────────────────────────────────
 export const getInward = (params) => client.get(withQuery("/inward", params || {}));
 export const getInwardNameValues = (field) =>
