@@ -111,8 +111,17 @@ const categoryOptions = useMemo(
     }
     try {
       if (editingId) {
-        await updateMaterial(editingId, payload);
-        setMsg({ text: `"${form.name}" updated successfully.`, ok: true });
+        const res = await updateMaterial(editingId, payload);
+        const inN = Number(res?.inwardUpdated) || 0;
+        const outN = Number(res?.outwardUpdated) || 0;
+        const syncNote =
+          inN || outN
+            ? ` Synced ${inN} inward and ${outN} outward row(s).`
+            : "";
+        setMsg({
+          text: `"${form.name}" updated successfully.${syncNote}`,
+          ok: true,
+        });
         setEditingId(null);
       } else {
         await addMaterial(payload);
@@ -120,7 +129,7 @@ const categoryOptions = useMemo(
       }
       setForm(EMPTY);
       load();
-      setTimeout(() => setMsg({ text: "", ok: true }), 4000);
+      setTimeout(() => setMsg({ text: "", ok: true }), 5000);
     } catch (err) {
       setMsg({ text: err.message, ok: false });
     }

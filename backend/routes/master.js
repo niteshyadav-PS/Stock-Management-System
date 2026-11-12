@@ -1,7 +1,20 @@
 const router   = require('express').Router();
 const Material = require('../models/Material');
+const Inward = require('../models/Inward');
+const Outward = require('../models/Outward');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { parsePagination, paginateQuery } = require('../utils/paginate');
+
+function escapeRegExp(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Case-insensitive exact match on stored material name. */
+function nameMatchFilter(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return null;
+  return { name: new RegExp(`^${escapeRegExp(trimmed)}$`, 'i') };
+}
 
 // GET /api/master
 // Optional ?page=&limit=&q= → { items, total, page, limit }; otherwise full array.
@@ -44,22 +57,55 @@ router.post('/', authMiddleware, requireRole('admin','purchase'), async (req, re
 });
 
 // PUT /api/master/:id  — edit existing material
+// Cascades name/type/code/category/uom to matching Inward + Outward rows
+// (those collections store denormalized strings, not materialId).
 router.put('/:id', authMiddleware, requireRole('admin','purchase'), async (req, res) => {
   try {
     const { name, type, code, category, uom, minStock } = req.body;
     if (!name) return res.status(400).json({ error: 'Material name is required' });
+
+    const existing = await Material.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Material not found' });
+
+    const oldName = String(existing.name || '').trim();
+    const newName = String(name).trim();
+    const syncFields = {
+      name: newName,
+      type: type || '',
+      code: code || '',
+      category: category || '',
+      uom: uom || '',
+    };
+
     const mat = await Material.findByIdAndUpdate(
       req.params.id,
       {
         $set: {
-          name: name.trim(), type, code, category, uom,
+          ...syncFields,
           minStock: parseFloat(minStock) || 0,
         },
       },
       { new: true, runValidators: true }
     );
-    if (!mat) return res.status(404).json({ error: 'Material not found' });
-    res.json(mat);
+
+    let inwardUpdated = 0;
+    let outwardUpdated = 0;
+    const match = nameMatchFilter(oldName);
+    if (match) {
+      const [inRes, outRes] = await Promise.all([
+        Inward.updateMany(match, { $set: syncFields }),
+        Outward.updateMany(match, { $set: syncFields }),
+      ]);
+      inwardUpdated = inRes.modifiedCount || 0;
+      outwardUpdated = outRes.modifiedCount || 0;
+    }
+
+    const payload = mat.toObject ? mat.toObject() : mat;
+    res.json({
+      ...payload,
+      inwardUpdated,
+      outwardUpdated,
+    });
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ error: 'Material name already exists' });
     res.status(500).json({ error: err.message });
