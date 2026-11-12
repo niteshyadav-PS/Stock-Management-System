@@ -114,7 +114,7 @@ function shortQty(v) {
 
 // ── Auto-fit stat number: measures the card's real width via ResizeObserver
 // and shrinks the number to fit exactly, instead of guessing from character
-// count. Never truncates — it keeps shrinking until the full value fits. ────
+// count. Never truncates — it keeps shrinking until the full value fits.
 function StatValue({ value, color, maxFontSize = 26, minFontSize = 9 }) {
   const wrapRef = useRef(null);
   const textRef = useRef(null);

@@ -4,7 +4,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "backup": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/backup-mongodb.ps1"
   },
   "engines": {
     "node": ">=20"
