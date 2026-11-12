@@ -5358,22 +5358,22 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         }
         .jo-vendor-custom-row input { flex: 1; min-width: 0; }
 
-        /* ── Orders table ────────────────────────────────────────────────── */
+        /* ── Orders table — fit laptop width, no horizontal scrollbar ── */
+        .tablewrap.jo-orders-wrap,
         .jo-orders-wrap {
           width: 100% !important;
           max-width: 100%;
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
+          overflow-x: hidden !important;
           box-sizing: border-box;
         }
         .jo-orders-table {
           width: 100% !important;
-          min-width: 1240px;
+          min-width: 0;
           table-layout: fixed;
           border-collapse: collapse;
         }
         .jo-orders-table th {
-          padding: 8px 6px;
+          padding: 7px 5px;
           font-size: 9.5px;
           line-height: 1.25;
           white-space: nowrap;
@@ -5381,32 +5381,31 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           text-overflow: ellipsis;
         }
         .jo-orders-table td {
-          padding: 8px 6px;
+          padding: 7px 5px;
           font-size: 12px;
-          line-height: 1.35;
+          line-height: 1.3;
           vertical-align: middle;
           overflow: hidden;
         }
         .jo-orders-table .jo-th-filter {
           max-width: 100%;
         }
-        /* Challan needs room for AEIL/DC/26-27/… style numbers; table scrolls if needed */
-        .jo-orders-table col.jo-col-challan { width: 168px; }
-        .jo-orders-table col.jo-col-date { width: 86px; }
-        .jo-orders-table col.jo-col-from { width: 16%; }
-        .jo-orders-table col.jo-col-to { width: 16%; }
-        .jo-orders-table col.jo-col-vehicle { width: 96px; }
-        .jo-orders-table col.jo-col-issued { width: 88px; }
-        .jo-orders-table col.jo-col-qty { width: 52px; }
-        .jo-orders-table col.jo-col-expected { width: 86px; }
+        .jo-orders-table col.jo-col-challan { width: 11%; }
+        .jo-orders-table col.jo-col-date { width: 7%; }
+        .jo-orders-table col.jo-col-from { width: 14%; }
+        .jo-orders-table col.jo-col-to { width: 13%; }
+        .jo-orders-table col.jo-col-vehicle { width: 7%; }
+        .jo-orders-table col.jo-col-issued { width: 7%; }
+        .jo-orders-table col.jo-col-qty { width: 5%; }
+        .jo-orders-table col.jo-col-expected { width: 7%; }
         .jo-orders-table col.jo-col-qc { width: 12%; }
-        .jo-orders-table col.jo-col-status { width: 118px; }
-        .jo-orders-table col.jo-col-act { width: 96px; }
+        .jo-orders-table col.jo-col-status { width: 11%; }
+        .jo-orders-table col.jo-col-act { width: 108px; }
         .jo-orders-table td.jo-td-challan {
           font-weight: 700;
-          white-space: normal;
-          overflow-wrap: anywhere;
-          word-break: break-word;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
           line-height: 1.3;
           font-size: 12px;
         }
@@ -5429,18 +5428,24 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           color: var(--text-2);
         }
         .jo-orders-table td.jo-td-clip {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+          overflow: visible;
+          text-overflow: unset;
+          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          line-height: 1.35;
         }
         .jo-orders-table td.jo-col-status {
           white-space: nowrap;
+          overflow: hidden;
         }
         .jo-orders-table th.jo-col-act,
         .jo-orders-table td.jo-col-act {
-          width: 96px;
-          min-width: 96px;
+          width: 108px;
+          min-width: 108px;
+          max-width: 108px;
           overflow: visible;
+          padding-right: 8px;
         }
         .jo-orders-table tbody tr.is-open td {
           background: var(--paper-dim);
@@ -5448,13 +5453,16 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         .jo-status-pill {
           display: inline-block;
           max-width: 100%;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          overflow: visible;
+          text-overflow: unset;
           font-size: 11px;
           font-weight: 700;
           padding: 3px 8px;
           border-radius: 12px;
-          white-space: nowrap;
+          white-space: normal;
+          line-height: 1.3;
+          overflow-wrap: anywhere;
+          word-break: break-word;
           text-transform: capitalize;
           vertical-align: middle;
         }
@@ -5761,18 +5769,39 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           line-height: 1.4;
         }
 
-        /* Hide lower-priority columns so Status + Actions stay on screen */
-        @media (max-width: 1400px) {
+        /* Laptop: drop Vehicle / Issued By / Expected so the rest fits */
+        @media (max-width: 1600px) {
           .jo-col-secondary { display: none !important; }
-          .jo-orders-table col.jo-col-from { width: 28%; }
-          .jo-orders-table col.jo-col-to { width: 24%; }
-          .jo-orders-table col.jo-col-qc { width: 20%; }
+          .jo-orders-table col.jo-col-challan { width: 11%; }
+          .jo-orders-table col.jo-col-date { width: 7%; }
+          .jo-orders-table col.jo-col-from { width: 18%; }
+          .jo-orders-table col.jo-col-to { width: 17%; }
+          .jo-orders-table col.jo-col-qty { width: 5%; }
+          .jo-orders-table col.jo-col-qc { width: 13%; }
+          .jo-orders-table col.jo-col-status { width: 12%; }
+          .jo-orders-table col.jo-col-act { width: 108px; }
+        }
+
+        @media (max-width: 1200px) {
+          .jo-orders-table col.jo-col-from { width: 17%; }
+          .jo-orders-table col.jo-col-to { width: 16%; }
+          .jo-orders-table col.jo-col-qc { width: 12%; }
+          .jo-orders-table td.jo-td-challan { font-size: 11px; }
+          .jo-status-pill {
+            font-size: 10px;
+            padding: 2px 6px;
+            white-space: normal;
+            line-height: 1.3;
+          }
         }
 
         @media (max-width: 1100px) {
           .jo-col-tablet-hide { display: none !important; }
-          .jo-orders-table col.jo-col-to { width: 40%; }
-          .jo-orders-table col.jo-col-status { width: 130px; }
+          .jo-orders-table col.jo-col-challan { width: 22%; }
+          .jo-orders-table col.jo-col-date { width: 14%; }
+          .jo-orders-table col.jo-col-to { width: 28%; }
+          .jo-orders-table col.jo-col-status { width: 20%; }
+          .jo-orders-table col.jo-col-act { width: 108px; }
           .jo-materials-table col.jo-m-num { width: 56px; }
           .jo-materials-table col.jo-m-qty { width: 72px; }
         }

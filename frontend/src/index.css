@@ -523,6 +523,20 @@ body {
 
 /* ── Table ─────────────────────────────────────────────────── */
 .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--radius); border: 1px solid var(--line); }
+
+/* Click-drag horizontal scroll when content overflows (utils/dragScroll.js) */
+.can-h-scroll {
+  cursor: grab;
+}
+.can-h-scroll :is(a, button, input, textarea, select, label, summary, [role="button"]) {
+  cursor: pointer;
+}
+.can-h-scroll.is-dragging,
+.can-h-scroll.is-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 thead { background: var(--paper-dim); }
 th {

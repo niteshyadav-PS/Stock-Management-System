@@ -972,41 +972,43 @@ export default function JobOrderDashboard() {
         }
         .jod-tablewrap {
           width: 100%;
-          overflow-x: auto;
+          overflow-x: hidden;
           overflow-y: visible;
-          -webkit-overflow-scrolling: touch;
           border-top: 1px solid var(--line);
         }
         .jod-table {
-          width: max-content;
-          min-width: 100%;
+          width: 100%;
+          min-width: 0;
           border-collapse: separate;
           border-spacing: 0;
-          table-layout: auto;
-          font-size: 12.5px;
+          table-layout: fixed;
+          font-size: 12px;
         }
         .jod-table th {
           text-align: left;
-          font-size: 10px;
+          font-size: 9.5px;
           font-weight: 700;
           letter-spacing: 0.04em;
           text-transform: uppercase;
           color: #7a7466;
-          padding: 11px 10px;
+          padding: 8px 6px;
           border-bottom: 1px solid #e4dfd2;
           background: #f7f4ec;
-          white-space: normal;
-          line-height: 1.3;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          line-height: 1.25;
           position: sticky;
           top: 0;
           z-index: 2;
           vertical-align: middle;
         }
         .jod-table td {
-          padding: 11px 10px;
+          padding: 8px 6px;
           border-bottom: 1px solid #efeae0;
           vertical-align: middle;
           color: var(--ink);
+          overflow: hidden;
         }
         .jod-table tr:last-child td { border-bottom: none; }
         .jod-table tbody tr { transition: background 0.12s ease; }
@@ -1030,18 +1032,31 @@ export default function JobOrderDashboard() {
           font-variant-numeric: tabular-nums;
           letter-spacing: 0.02em;
           white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .jod-table .jod-vendor {
           font-weight: 600;
           white-space: normal;
-          min-width: 140px;
-          max-width: 220px;
+          overflow: visible;
+          text-overflow: unset;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          min-width: 0;
+          max-width: none;
           line-height: 1.35;
         }
         .jod-clip {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .jod-table td.jod-party.jod-clip {
+          white-space: normal;
           overflow: visible;
           text-overflow: unset;
-          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
         }
         .jod-item {
           font-weight: 600;
@@ -1056,12 +1071,13 @@ export default function JobOrderDashboard() {
         .jod-pill {
           display: inline-flex;
           align-items: center;
-          max-width: none;
+          max-width: 100%;
           overflow: visible;
-          font-size: 10.5px;
+          text-overflow: unset;
+          font-size: 10px;
           font-weight: 700;
           letter-spacing: 0.01em;
-          padding: 4px 8px;
+          padding: 3px 6px;
           border-radius: 6px;
           border: 1px solid transparent;
           background: #f0eee8;
@@ -1069,6 +1085,8 @@ export default function JobOrderDashboard() {
           white-space: normal;
           line-height: 1.3;
           text-align: left;
+          overflow-wrap: anywhere;
+          word-break: break-word;
         }
         .jod-pill.warn {
           background: #fff4ec;
@@ -1090,18 +1108,22 @@ export default function JobOrderDashboard() {
           border-color: #c3dcd7;
           color: #143e38;
         }
-        .jod-table col.jod-c-challan { width: 88px; }
-        .jod-table col.jod-c-party { width: 140px; }
-        .jod-table col.jod-c-date { width: 100px; }
-        .jod-table col.jod-c-delay { width: 92px; }
-        .jod-table col.jod-c-qty { width: 64px; }
-        .jod-table col.jod-c-status { width: 132px; }
-        .jod-table col.jod-c-act { width: 168px; }
+        .jod-table col.jod-c-challan { width: 8%; }
+        .jod-table col.jod-c-party { width: 14%; }
+        .jod-table col.jod-c-date { width: 7%; }
+        .jod-table col.jod-c-delay { width: 7%; }
+        .jod-table col.jod-c-qty { width: 4.5%; }
+        .jod-table col.jod-c-status { width: 10%; }
+        .jod-table col.jod-c-act { width: 140px; }
         .jod-table .jod-party {
           font-weight: 600;
           white-space: normal;
-          min-width: 100px;
-          max-width: 160px;
+          overflow: visible;
+          text-overflow: unset;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          min-width: 0;
+          max-width: none;
           line-height: 1.35;
         }
         .jod-table th .col-filter-btn,
@@ -1109,8 +1131,8 @@ export default function JobOrderDashboard() {
           vertical-align: middle;
         }
         .jod-table td.jod-status {
-          min-width: 120px;
-          max-width: 150px;
+          min-width: 0;
+          max-width: none;
         }
         .jod-delay {
           display: inline-flex;
@@ -1138,40 +1160,87 @@ export default function JobOrderDashboard() {
         }
         .jod-table th.jod-act-head,
         .jod-table td.jod-act {
-          position: sticky;
-          right: 0;
-          text-align: right;
-          padding-left: 8px;
-          padding-right: 12px;
-          min-width: 168px;
-          width: 168px;
+          text-align: left;
+          padding: 8px 6px;
+          width: 140px;
+          min-width: 140px;
+          max-width: 140px;
           white-space: nowrap;
-          box-shadow: -6px 0 10px -8px rgba(28, 26, 22, 0.28);
+          border-left: 1px solid #ebe6da;
         }
         .jod-table th.jod-act-head {
-          z-index: 4;
           background: #f7f4ec;
-        }
-        .jod-table td.jod-act {
-          z-index: 3;
-          background: #fff;
-        }
-        .jod-table tbody tr:hover td.jod-act {
-          background: #fbfaf6;
+          letter-spacing: 0.04em;
         }
         .jod-act-btns {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 5px;
+          width: 100%;
+          align-items: center;
+        }
+        .jod-act-btn {
           display: inline-flex;
           align-items: center;
-          justify-content: flex-end;
-          gap: 6px;
-          flex-wrap: nowrap;
-        }
-        .jod-act-btns .btn {
-          flex: 0 0 auto;
-          padding: 5px 10px;
-          font-size: 12px;
-          line-height: 1.2;
+          justify-content: center;
+          width: 100%;
           min-height: 28px;
+          margin: 0;
+          padding: 0 6px;
+          border-radius: 7px;
+          border: 1px solid transparent;
+          font: inherit;
+          font-size: 11px;
+          font-weight: 650;
+          letter-spacing: 0.01em;
+          line-height: 1;
+          cursor: pointer;
+          transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+        }
+        .jod-act-btn:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+        .jod-act-btn--view {
+          background: #fff;
+          border-color: #d8d2c4;
+          color: #2f4a43;
+          box-shadow: 0 1px 0 rgba(28, 26, 22, 0.03);
+        }
+        .jod-act-btn--view:hover:not(:disabled) {
+          background: #f4f8f6;
+          border-color: #9bbbb3;
+          color: var(--teal-dark, #16483f);
+        }
+        .jod-act-btn--receive {
+          background: var(--teal, #1f5c52);
+          border-color: var(--teal, #1f5c52);
+          color: #fff;
+          box-shadow: 0 1px 2px rgba(31, 92, 82, 0.22);
+        }
+        .jod-act-btn--receive:hover:not(:disabled) {
+          background: var(--teal-dark, #16483f);
+          border-color: var(--teal-dark, #16483f);
+        }
+        .jod-act-slot {
+          display: block;
+          min-height: 28px;
+        }
+        /* Laptop: hide Delivery / Delay so Action + Status stay on screen */
+        @media (max-width: 1500px) {
+          .jod-hide-laptop { display: none !important; }
+          .jod-table col.jod-c-challan { width: 9%; }
+          .jod-table col.jod-c-party { width: 16%; }
+          .jod-table col.jod-c-date { width: 8%; }
+          .jod-table col.jod-c-qty { width: 5%; }
+          .jod-table col.jod-c-status { width: 12%; }
+          .jod-table col.jod-c-act { width: 140px; }
+        }
+        @media (max-width: 1200px) {
+          .jod-table col.jod-c-party { width: 15%; }
+          .jod-table col.jod-c-status { width: 11%; }
+          .jod-table th,
+          .jod-table td { padding: 7px 4px; }
         }
         @media (max-width: 1100px) {
           .jod-toolbar {
@@ -1444,8 +1513,8 @@ export default function JobOrderDashboard() {
                   <col className="jod-c-party" />
                   <col className="jod-c-date" />
                   <col className="jod-c-date" />
-                  <col className="jod-c-date" />
-                  <col className="jod-c-delay" />
+                  <col className="jod-c-date jod-hide-laptop" />
+                  <col className="jod-c-delay jod-hide-laptop" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
                   <col className="jod-c-qty" />
@@ -1486,12 +1555,14 @@ export default function JobOrderDashboard() {
                       onChange={(v) => setColFilters((f) => ({ ...f, expected: v }))}
                     />
                     <ThFilter
+                      className="jod-hide-laptop"
                       label="Delivery Date"
                       values={colOpts.delivery}
                       selected={colFilters.delivery}
                       onChange={(v) => setColFilters((f) => ({ ...f, delivery: v }))}
                     />
                     <ThFilter
+                      className="jod-hide-laptop"
                       label="Delay Day"
                       values={colOpts.delay}
                       selected={colFilters.delay}
@@ -1564,8 +1635,8 @@ export default function JobOrderDashboard() {
                         <td className="jod-clip jod-party" title={line.sendToName}>{line.sendToName}</td>
                         <td className="jod-clip jod-date">{line.dcDateLabel}</td>
                         <td className="jod-clip jod-date">{line.expectedLabel}</td>
-                        <td className="jod-clip jod-date">{line.deliveryLabel}</td>
-                        <td className="jod-clip">
+                        <td className="jod-clip jod-date jod-hide-laptop">{line.deliveryLabel}</td>
+                        <td className="jod-clip jod-hide-laptop">
                           {line.delayLabel === "—"
                             ? "—"
                             : <span className={delayClass}>{line.delayLabel}</span>}
@@ -1581,21 +1652,23 @@ export default function JobOrderDashboard() {
                           <div className="jod-act-btns">
                             <button
                               type="button"
-                              className="btn btn-ghost btn-sm"
+                              className="jod-act-btn jod-act-btn--view"
                               onClick={() => openOrder(line)}
                             >
                               View
                             </button>
-                            {canReceive && line.receivable > 0.0001 && (
+                            {canReceive && line.receivable > 0.0001 ? (
                               <button
                                 type="button"
-                                className="btn btn-in btn-sm"
+                                className="jod-act-btn jod-act-btn--receive"
                                 disabled={receiveOpening}
                                 onClick={() => openReceive(line)}
                                 title="Receive ready material at store"
                               >
                                 Receive
                               </button>
+                            ) : (
+                              <span className="jod-act-slot" aria-hidden="true" />
                             )}
                           </div>
                         </td>
