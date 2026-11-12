@@ -1091,17 +1091,17 @@ export default function JobOrderDashboard() {
           color: #143e38;
         }
         .jod-table col.jod-c-challan { width: 88px; }
-        .jod-table col.jod-c-party { width: 160px; }
-        .jod-table col.jod-c-date { width: 108px; }
-        .jod-table col.jod-c-delay { width: 100px; }
-        .jod-table col.jod-c-qty { width: 72px; }
-        .jod-table col.jod-c-status { width: 150px; }
-        .jod-table col.jod-c-act { width: 72px; }
+        .jod-table col.jod-c-party { width: 140px; }
+        .jod-table col.jod-c-date { width: 100px; }
+        .jod-table col.jod-c-delay { width: 92px; }
+        .jod-table col.jod-c-qty { width: 64px; }
+        .jod-table col.jod-c-status { width: 132px; }
+        .jod-table col.jod-c-act { width: 168px; }
         .jod-table .jod-party {
           font-weight: 600;
           white-space: normal;
-          min-width: 120px;
-          max-width: 200px;
+          min-width: 100px;
+          max-width: 160px;
           line-height: 1.35;
         }
         .jod-table th .col-filter-btn,
@@ -1109,7 +1109,8 @@ export default function JobOrderDashboard() {
           vertical-align: middle;
         }
         .jod-table td.jod-status {
-          min-width: 140px;
+          min-width: 120px;
+          max-width: 150px;
         }
         .jod-delay {
           display: inline-flex;
@@ -1135,17 +1136,42 @@ export default function JobOrderDashboard() {
           background: #eef5f3;
           color: #16483f;
         }
+        .jod-table th.jod-act-head,
         .jod-table td.jod-act {
+          position: sticky;
+          right: 0;
           text-align: right;
-          padding-right: 10px;
+          padding-left: 8px;
+          padding-right: 12px;
+          min-width: 168px;
+          width: 168px;
           white-space: nowrap;
+          box-shadow: -6px 0 10px -8px rgba(28, 26, 22, 0.28);
+        }
+        .jod-table th.jod-act-head {
+          z-index: 4;
+          background: #f7f4ec;
+        }
+        .jod-table td.jod-act {
+          z-index: 3;
+          background: #fff;
+        }
+        .jod-table tbody tr:hover td.jod-act {
+          background: #fbfaf6;
         }
         .jod-act-btns {
           display: inline-flex;
           align-items: center;
           justify-content: flex-end;
           gap: 6px;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
+        }
+        .jod-act-btns .btn {
+          flex: 0 0 auto;
+          padding: 5px 10px;
+          font-size: 12px;
+          line-height: 1.2;
+          min-height: 28px;
         }
         @media (max-width: 1100px) {
           .jod-toolbar {
@@ -1505,7 +1531,7 @@ export default function JobOrderDashboard() {
                       selected={colFilters.pipeline}
                       onChange={(v) => setColFilters((f) => ({ ...f, pipeline: v }))}
                     />
-                    <th style={{ textAlign: "right" }}>Action</th>
+                    <th className="jod-act-head">Action</th>
                   </tr>
                 </thead>
                 <tbody>
