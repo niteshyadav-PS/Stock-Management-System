@@ -39,7 +39,54 @@ const CHART_COLORS = [
   "#f4a261",
 ];
 
-const shortName = (name) => (name.length > 16 ? name.slice(0, 16) + "…" : name);
+/** Wrap long material names onto multiple lines for chart axis labels. */
+function wrapChartLabel(text, maxChars = 16) {
+  const words = String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return [""];
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    // Hard-split very long tokens so they still fit under a bar.
+    const chunks =
+      w.length > maxChars
+        ? w.match(new RegExp(`.{1,${maxChars}}`, "g")) || [w]
+        : [w];
+    for (const chunk of chunks) {
+      const next = cur ? `${cur} ${chunk}` : chunk;
+      if (next.length > maxChars && cur) {
+        lines.push(cur);
+        cur = chunk;
+      } else {
+        cur = next;
+      }
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function ChartXTick({ x, y, payload, fontSize = 10 }) {
+  const lines = wrapChartLabel(payload?.value, 15);
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        textAnchor="middle"
+        fill="#5c5648"
+        fontSize={fontSize}
+        fontFamily="Poppins, sans-serif"
+      >
+        {lines.map((line, i) => (
+          <tspan key={i} x={0} dy={i === 0 ? 10 : 11}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+}
 
 // ── Custom tooltip ─────────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label }) {
@@ -53,7 +100,7 @@ function CustomTooltip({ active, payload, label }) {
         padding: "8px 12px",
         fontSize: 12,
         boxShadow: "0 4px 12px rgba(0,0,0,.1)",
-        maxWidth: 220,
+        maxWidth: 340,
       }}
     >
       <div
@@ -61,7 +108,9 @@ function CustomTooltip({ active, payload, label }) {
           fontWeight: 600,
           marginBottom: 4,
           color: "var(--ink)",
-          overflowWrap: "break-word",
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+          whiteSpace: "normal",
         }}
       >
         {label}
@@ -355,7 +404,7 @@ export default function StockOverview() {
         .sort((a, b) => b.stock - a.stock)
         .slice(0, 10)
         .map((r) => ({
-          name: shortName(r.name),
+          name: r.name || "—",
           stock: Math.round(r.stock),
           inQty: Math.round(r.inQty),
           outQty: Math.round(r.outQty),
@@ -364,17 +413,17 @@ export default function StockOverview() {
       const topInward = [...allRows]
         .sort((a, b) => b.inQty - a.inQty)
         .slice(0, 10)
-        .map((r) => ({ name: shortName(r.name), inQty: Math.round(r.inQty) }));
+        .map((r) => ({ name: r.name || "—", inQty: Math.round(r.inQty) }));
 
       const topOutward = [...allRows]
         .sort((a, b) => b.outQty - a.outQty)
         .slice(0, 10)
-        .map((r) => ({ name: shortName(r.name), outQty: Math.round(r.outQty) }));
+        .map((r) => ({ name: r.name || "—", outQty: Math.round(r.outQty) }));
 
       const topValue = [...allRows]
         .sort((a, b) => b.totalVal - a.totalVal)
         .slice(0, 10)
-        .map((r) => ({ name: shortName(r.name), value: Math.round(r.totalVal) }));
+        .map((r) => ({ name: r.name || "—", value: Math.round(r.totalVal) }));
 
       const catMap = {};
       allRows.forEach((r) => {
@@ -387,7 +436,7 @@ export default function StockOverview() {
         .map(([name, value]) => ({ name, value: Math.round(value) }));
 
       const lowStockChart = lowStockItems.slice(0, 10).map((r) => ({
-        name: shortName(r.name),
+        name: r.name || "—",
         stock: Math.round(r.stock),
         minStock: Math.round(r.minStock),
       }));
@@ -431,10 +480,10 @@ export default function StockOverview() {
   // Per-bar width (bar + gap) so dense charts scroll horizontally on small
   // screens instead of squeezing labels/bars until they overflow their card.
   const barWidth = isMobile ? 74 : 92;
-  const chartMinWidth = (n) => Math.max(340, n * barWidth);
-  const chartHeight = isMobile ? 220 : 260;
+  const chartMinWidth = (n) => Math.max(420, n * Math.max(barWidth, isMobile ? 88 : 108));
+  const chartHeight = isMobile ? 280 : 340;
   const xAxisFont = isMobile ? 9 : 10;
-  const bottomMargin = isMobile ? 60 : 70;
+  const bottomMargin = isMobile ? 100 : 120;
   const barSize = isMobile ? 30 : 40;
   const groupedBarSize = isMobile ? 16 : 22;
   const barCategoryGap = "28%";
@@ -732,10 +781,9 @@ export default function StockOverview() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis
                     dataKey="name"
-                    tick={{ fontSize: xAxisFont }}
-                    angle={-35}
-                    textAnchor="end"
                     interval={0}
+                    height={bottomMargin}
+                    tick={<ChartXTick fontSize={xAxisFont} />}
                   />
                   <YAxis
                     tick={{ fontSize: 11 }}
@@ -777,10 +825,9 @@ export default function StockOverview() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis
                     dataKey="name"
-                    tick={{ fontSize: xAxisFont }}
-                    angle={-35}
-                    textAnchor="end"
                     interval={0}
+                    height={bottomMargin}
+                    tick={<ChartXTick fontSize={xAxisFont} />}
                   />
                   <YAxis
                     tick={{ fontSize: 11 }}
@@ -822,10 +869,9 @@ export default function StockOverview() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis
                     dataKey="name"
-                    tick={{ fontSize: xAxisFont }}
-                    angle={-35}
-                    textAnchor="end"
                     interval={0}
+                    height={bottomMargin}
+                    tick={<ChartXTick fontSize={xAxisFont} />}
                   />
                   <YAxis
                     tick={{ fontSize: 11 }}
@@ -940,10 +986,9 @@ export default function StockOverview() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis
                     dataKey="name"
-                    tick={{ fontSize: xAxisFont }}
-                    angle={-35}
-                    textAnchor="end"
                     interval={0}
+                    height={bottomMargin}
+                    tick={<ChartXTick fontSize={xAxisFont} />}
                   />
                   <YAxis
                     tick={{ fontSize: 11 }}
@@ -1000,10 +1045,9 @@ export default function StockOverview() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis
                       dataKey="name"
-                      tick={{ fontSize: xAxisFont }}
-                      angle={-35}
-                      textAnchor="end"
                       interval={0}
+                      height={bottomMargin}
+                      tick={<ChartXTick fontSize={xAxisFont} />}
                     />
                     <YAxis
                       tick={{ fontSize: 11 }}
