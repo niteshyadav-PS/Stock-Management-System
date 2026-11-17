@@ -420,12 +420,7 @@ router.post('/', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, res)
     if (!Array.isArray(items) || !items.length)
       return res.status(400).json({ error: 'At least one item is required.' });
 
-    const existing = await PurchaseOrder.findOne({ poNumber: cleanPoNumber }).lean();
-    if (existing)
-      return res.status(409).json({
-        error: `PO number "${cleanPoNumber}" already exists. Use a unique PO number for each purchase order.`,
-      });
-
+    // Same PO number is allowed across multiple PRs / PO documents.
     const pr = await PurchaseRequest.findById(prId);
     if (!pr) return res.status(404).json({ error: 'Purchase request not found.' });
     if (!['approved', 'partial', 'ordered'].includes(pr.status))
@@ -503,13 +498,10 @@ router.post('/', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, res)
       fullyCovered: !!fullyCovered,
     });
   } catch (err) {
-    if (err.code === 11000) return res.status(409).json({ error: 'PO number collision — please retry.' });
     res.status(500).json({ error: err.message });
   }
 });
 
-// PATCH /api/purchase-orders/:id — full edit (fields + items), logs exactly what changed
-// PATCH /api/purchase-orders/:id — full edit (fields + items), logs structured field-level diff
 // PATCH /api/purchase-orders/:id — full edit (fields + items), logs structured field-level diff
 router.patch('/:id', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, res) => {
   try {
@@ -525,16 +517,7 @@ router.patch('/:id', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, 
     if (!Array.isArray(items) || !items.length)
       return res.status(400).json({ error: 'At least one item is required.' });
 
-    if (cleanPoNumber !== po.poNumber) {
-      const clash = await PurchaseOrder.findOne({
-        poNumber: cleanPoNumber,
-        _id: { $ne: po._id },
-      }).lean();
-      if (clash)
-        return res.status(409).json({
-          error: `PO number "${cleanPoNumber}" already exists. Use a unique PO number.`,
-        });
-    }
+    // Same PO number may already exist on other POs / PRs — do not block.
 
     const inwarded = await inwardedQtyMapForPos([po.toObject ? po.toObject() : po]);
     const cleanItems = [];
@@ -584,8 +567,15 @@ router.patch('/:id', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, 
     await po.save();
 
     if (cleanPoNumber !== oldNumber) {
-      await Inward.updateMany({ po: oldNumber }, { $set: { po: cleanPoNumber } });
-      await PurchaseRequest.updateOne({ poNumber: oldNumber }, { $set: { poNumber: cleanPoNumber } });
+      // Only rewrite inwards linked to this PO id — shared PO numbers on
+      // other documents must stay untouched.
+      await Inward.updateMany({ poId: po._id }, { $set: { po: cleanPoNumber } });
+      if (po.prId) {
+        await PurchaseRequest.updateOne(
+          { _id: po.prId },
+          { $set: { poNumber: cleanPoNumber } },
+        );
+      }
     }
 
     await syncPrStatus(po.prId, {
@@ -596,7 +586,6 @@ router.patch('/:id', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, 
 
     res.json(po);
   } catch (err) {
-    if (err.code === 11000) return res.status(409).json({ error: 'PO number collision — please retry.' });
     res.status(500).json({ error: err.message });
   }
 });
