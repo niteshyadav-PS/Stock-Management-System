@@ -20,8 +20,22 @@ function pickFields(body, fields) {
   }, {});
 }
 
+function lineKey(name, projectName) {
+  return `${String(name || '').trim()}||${String(projectName || '').trim()}`;
+}
+
+function resolveProject(...parts) {
+  for (const p of parts) {
+    const s = String(p || '').trim();
+    if (s) return s;
+  }
+  return '';
+}
+
 // ── Helper: after inward entries are saved, check if the linked PR
-// should be auto-advanced to "received" (all PO items fully received).
+// should be auto-advanced to "received".
+// Only mark received when EVERY PR line is fully ordered AND fully inwarded.
+// Receiving only the items that were put on a partial PO must NOT close the PR.
 async function checkAndReceivePR(poNumbers, byName, byUsername) {
   if (!poNumbers || !poNumbers.length) return;
 
@@ -34,42 +48,87 @@ async function checkAndReceivePR(poNumbers, byName, byUsername) {
 
   for (const prId of prIdSet) {
     const pr = await PurchaseRequest.findById(prId);
-    if (!pr || pr.status === 'received' || pr.status === 'rejected') continue;
+    if (!pr || pr.status === 'rejected') continue;
 
     // Get all POs for this PR
     const allPRPos = await PurchaseOrder.find({ prId }).lean();
     if (!allPRPos.length) continue;
 
-    // Sum total ordered qty per item across all POs
+    // Sum ordered qty per PR line (name + project)
     const orderedMap = {};
     for (const po of allPRPos) {
       for (const it of (po.items || [])) {
-        orderedMap[it.name] = (orderedMap[it.name] || 0) + (it.orderedQty || 0);
+        const key = lineKey(it.name, resolveProject(it.projectName, po.projectName));
+        orderedMap[key] = (orderedMap[key] || 0) + (Number(it.orderedQty) || 0);
       }
     }
 
-    // Sum total received qty per item across all inward entries linked to these POs
-    const poNums = allPRPos.map(p => p.poNumber);
-    const inwardDocs = await Inward.find({ po: { $in: poNums } }).lean();
+    // Sum received qty linked to these POs (prefer poId, fall back to po number)
+    const poIds = allPRPos.map((p) => p._id).filter(Boolean);
+    const poNums = allPRPos.map((p) => p.poNumber).filter(Boolean);
+    const inwardDocs = await Inward.find({
+      $or: [
+        ...(poIds.length ? [{ poId: { $in: poIds } }] : []),
+        ...(poNums.length ? [{ po: { $in: poNums } }] : []),
+      ],
+    }).lean();
     const receivedMap = {};
     for (const doc of inwardDocs) {
-      if (!doc.po) continue;
-      receivedMap[doc.name] = (receivedMap[doc.name] || 0) + (doc.qty || 0);
+      const name = String(doc.name || '').trim();
+      if (!name) continue;
+      receivedMap[name] = (receivedMap[name] || 0) + (Number(doc.qty) || 0);
     }
 
-    // Check if every ordered item is fully received
-    const fullyReceived = Object.entries(orderedMap).every(([name, ordQty]) => {
-      return (receivedMap[name] || 0) >= ordQty - 0.00001;
-    });
+    function orderedForPrItem(it) {
+      const project = resolveProject(it.projectName, pr.projectName);
+      const key = lineKey(it.name, project);
+      if ((orderedMap[key] || 0) > 0) return orderedMap[key] || 0;
+      const bare = lineKey(it.name, '');
+      const sameNameCount = (pr.items || []).filter(
+        (x) => String(x.name || '').trim() === String(it.name || '').trim(),
+      ).length;
+      if (sameNameCount === 1) return orderedMap[bare] || 0;
+      return 0;
+    }
 
-    if (fullyReceived) {
-      pr.status     = 'received';
-      pr.receivedAt = new Date();
+    const items = pr.items || [];
+    const fullyOrdered = items.every((it) => {
+      const need = Number(it.qty) || 0;
+      return orderedForPrItem(it) >= need - 0.00001;
+    });
+    const fullyReceived = items.every((it) => {
+      const need = Number(it.qty) || 0;
+      const name = String(it.name || '').trim();
+      return (receivedMap[name] || 0) >= need - 0.00001;
+    });
+    const anyOrdered = items.some((it) => orderedForPrItem(it) > 0.00001);
+
+    if (fullyOrdered && fullyReceived) {
+      if (pr.status !== 'received') {
+        pr.status = 'received';
+        pr.receivedAt = new Date();
+        pr.history.push({
+          status: 'received',
+          byName: byName || 'System',
+          byUsername: byUsername || 'system',
+          note: 'Auto-marked received — all PR items ordered and inwarded.',
+          at: new Date(),
+        });
+        await pr.save();
+      }
+      continue;
+    }
+
+    // Reopen PRs that were wrongly closed when only a partial PO was inwarded.
+    if (pr.status === 'received') {
+      const next = fullyOrdered ? 'ordered' : anyOrdered ? 'partial' : 'approved';
+      pr.status = next;
+      pr.receivedAt = null;
       pr.history.push({
-        status: 'received',
-        byName:     byName || 'System',
+        status: next,
+        byName: byName || 'System',
         byUsername: byUsername || 'system',
-        note: 'Auto-marked received — all PO items inwarded.',
+        note: 'Status corrected — PR still has unordered or unreceived items.',
         at: new Date(),
       });
       await pr.save();

@@ -105,6 +105,7 @@ function receivedForPoItem(inwarded, po, itemName) {
 async function syncPrStatus(prId, { note, byName, byUsername } = {}) {
   const pr = await PurchaseRequest.findById(prId);
   if (!pr) return null;
+  if (pr.status === 'rejected') return pr;
 
   const updatedOrdered = await orderedQtyMap(prId);
   const fullyCovered = pr.items.every(it =>
@@ -115,7 +116,18 @@ async function syncPrStatus(prId, { note, byName, byUsername } = {}) {
   );
 
   const prevStatus = pr.status;
-  pr.status = fullyCovered ? 'ordered' : anyOrdered ? 'partial' : 'approved';
+  // Do not keep a false "received" when unordered PR lines remain.
+  // True "received" is set by inward auto-receive only when all PR qty is inwarded.
+  let nextStatus = fullyCovered ? 'ordered' : anyOrdered ? 'partial' : 'approved';
+  if (prevStatus === 'received' && fullyCovered) {
+    // Keep received only if still fully ordered; inward flow owns the received flag.
+    nextStatus = 'received';
+  } else if (prevStatus === 'received' && !fullyCovered) {
+    nextStatus = anyOrdered ? 'partial' : 'approved';
+  }
+
+  pr.status = nextStatus;
+  if (nextStatus !== 'received') pr.receivedAt = null;
   const statusChanged = prevStatus !== pr.status;
   if (statusChanged || note) {
     pr.history.push({
@@ -266,7 +278,7 @@ router.post('/resync-status/:prId', authMiddleware, requireRole(...ALLOWED_ROLES
 router.post('/heal-pending', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, res) => {
   try {
     const prs = await PurchaseRequest.find({
-      status: { $in: ['approved', 'partial'] },
+      status: { $in: ['approved', 'partial', 'ordered', 'received'] },
     }).select('_id prNumber status');
 
     let healed = 0;
@@ -423,6 +435,28 @@ router.post('/', authMiddleware, requireRole(...ALLOWED_ROLES), async (req, res)
     // Same PO number is allowed across multiple PRs / PO documents.
     const pr = await PurchaseRequest.findById(prId);
     if (!pr) return res.status(404).json({ error: 'Purchase request not found.' });
+
+    // Reopen PRs wrongly auto-marked received while unordered lines remain.
+    if (pr.status === 'received') {
+      const alreadyForGate = await orderedQtyMap(prId);
+      const hasRemaining = (pr.items || []).some((it) => {
+        const already = orderedForPrLine(alreadyForGate, pr, it);
+        return (parseFloat(it.qty) || 0) - already > 0.00001;
+      });
+      if (hasRemaining) {
+        pr.status = 'partial';
+        pr.receivedAt = null;
+        pr.history.push({
+          status: 'partial',
+          byName: req.user.name,
+          byUsername: req.user.username,
+          note: 'Reopened — PR still has items pending PO create after partial inward.',
+          at: new Date(),
+        });
+        await pr.save();
+      }
+    }
+
     if (!['approved', 'partial', 'ordered'].includes(pr.status))
       return res.status(400).json({ error: `Cannot create a PO for a PR with status "${pr.status}".` });
 
