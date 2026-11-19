@@ -593,7 +593,7 @@ export default function PurchaseRequest() {
     const [m, r, summary, received] = await Promise.all([
       getMaster(), getPurchaseRequests(), getStockSummary(), getReceivedByPo(),
     ]);
-    const masterList = unwrapList(m);
+    const masterList = unwrapList(m).filter((x) => x.active !== false);
     setMaster(masterList);
     setRequests(unwrapList(r));
     setReceivedByPo(received?.byKey || {});

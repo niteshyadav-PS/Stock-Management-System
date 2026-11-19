@@ -17,21 +17,33 @@ function nameMatchFilter(name) {
 }
 
 // GET /api/master
-// Optional ?page=&limit=&q= → { items, total, page, limit }; otherwise full array.
+// Optional ?page=&limit=&q=&active=true|false → { items, total, page, limit }; otherwise full array.
+// active=true includes legacy rows with missing active field (treated as active).
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
     const q = String(req.query.q || "").trim();
-    const filter = q
-      ? {
-          $or: [
-            { name: { $regex: q, $options: "i" } },
-            { code: { $regex: q, $options: "i" } },
-            { category: { $regex: q, $options: "i" } },
-            { type: { $regex: q, $options: "i" } },
-          ],
-        }
-      : {};
+    const activeRaw = String(req.query.active || "").trim().toLowerCase();
+    const filter = {};
+    if (q) {
+      filter.$and = filter.$and || [];
+      filter.$and.push({
+        $or: [
+          { name: { $regex: q, $options: "i" } },
+          { code: { $regex: q, $options: "i" } },
+          { category: { $regex: q, $options: "i" } },
+          { type: { $regex: q, $options: "i" } },
+        ],
+      });
+    }
+    if (activeRaw === "true" || activeRaw === "1") {
+      filter.$and = filter.$and || [];
+      filter.$and.push({
+        $or: [{ active: true }, { active: { $exists: false } }],
+      });
+    } else if (activeRaw === "false" || activeRaw === "0") {
+      filter.active = false;
+    }
     const result = await paginateQuery(Material, filter, {
       sort: { name: 1 },
       pagination,
@@ -48,6 +60,7 @@ router.post('/', authMiddleware, requireRole('admin','purchase'), async (req, re
     const mat = await Material.create({
       name: name.trim(), type, code, category, uom,
       minStock: parseFloat(minStock) || 0,
+      active: true,
     });
     res.status(201).json(mat);
   } catch (err) {
@@ -123,16 +136,38 @@ router.post('/bulk', authMiddleware, requireRole('admin','purchase'), async (req
       if (!m.name) { skipped++; continue; }
       await Material.findOneAndUpdate(
         { name: m.name.trim() },
-        { $set: {
+        {
+          $set: {
             type: m.type||'', code: m.code||'', category: m.category||'', uom: m.uom||'',
             minStock: parseFloat(m.minStock) || 0,
-          } },
+          },
+          $setOnInsert: { active: true },
+        },
         { upsert: true }
       );
       added++;
     }
     res.json({ added, skipped });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /api/master/:id/active — admin / purchase activate / deactivate
+router.patch('/:id/active', authMiddleware, requireRole('admin','purchase'), async (req, res) => {
+  try {
+    const active = req.body?.active;
+    if (typeof active !== 'boolean') {
+      return res.status(400).json({ error: 'active must be true or false.' });
+    }
+    const mat = await Material.findByIdAndUpdate(
+      req.params.id,
+      { $set: { active } },
+      { new: true, runValidators: true },
+    );
+    if (!mat) return res.status(404).json({ error: 'Material not found' });
+    res.json(mat);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE /api/master/:id

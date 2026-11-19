@@ -592,7 +592,7 @@ export default function OutwardEntry() {
     try {
       const [m, summary] = await Promise.all([getMaster(), getStockSummary()]);
       if (gen !== loadGen.current) return;
-      setMaster(unwrapList(m));
+      setMaster(unwrapList(m).filter((x) => x.active !== false));
       applySummary(summary);
       await entriesPromise;
     } catch (e) {

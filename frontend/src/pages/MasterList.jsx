@@ -3,12 +3,15 @@ import {
   getMaster,
   addMaterial,
   updateMaterial,
+  setMaterialActive,
   bulkMaster,
   deleteMaterial,
   getStockMaterialNameValues,
   renameStockMaterialNames,
   unwrapList,
 } from "../api/api";
+
+const isMaterialActive = (m) => m?.active !== false;
 import { useAuth } from "../context/AuthContext";
 import { readSheetFile, pickCol, exportXlsx } from "../utils/helpers";
 import Pagination from "../components/Pagination";
@@ -30,15 +33,18 @@ export default function MasterList() {
   const { user } = useAuth();
   const [list, setList] = useState([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all"); // all | active | inactive
   const [form, setForm] = useState(EMPTY);
   const [editingId, setEditingId] = useState(null);
   const [msg, setMsg] = useState({ text: "", ok: true });
   const [uploadMsg, setUploadMsg] = useState({ text: "", ok: true });
   const [renameOpen, setRenameOpen] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
   const isViewerOnly = user?.role === "viewer";
   const isAdmin = user?.role === "admin";
   const isPurchase = user?.role === "purchase";
   const canFixPastNames = isAdmin || isPurchase;
+  const canToggleActive = isAdmin || isPurchase;
 
   const load = useCallback(async () => {
     try {
@@ -51,14 +57,25 @@ export default function MasterList() {
 
   const filtered = useMemo(
     () =>
-      list.filter(
-        (m) =>
-          !search ||
-          m.name.toLowerCase().includes(search.toLowerCase()) ||
-          (m.code || "").toLowerCase().includes(search.toLowerCase()),
-      ),
-    [list, search],
+      list.filter((m) => {
+        const q = search.trim().toLowerCase();
+        const matchesSearch =
+          !q ||
+          m.name.toLowerCase().includes(q) ||
+          (m.code || "").toLowerCase().includes(q);
+        if (!matchesSearch) return false;
+        if (statusFilter === "active") return isMaterialActive(m);
+        if (statusFilter === "inactive") return !isMaterialActive(m);
+        return true;
+      }),
+    [list, search, statusFilter],
   );
+
+  const activeCount = useMemo(
+    () => list.filter(isMaterialActive).length,
+    [list],
+  );
+  const inactiveCount = list.length - activeCount;
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filtered, 25);
 
@@ -176,6 +193,42 @@ const categoryOptions = useMemo(
       load();
     } catch (err) {
       alert(err.message);
+    }
+  }
+
+  async function handleToggleActive(m) {
+    if (!canToggleActive) {
+      setMsg({ text: "You do not have permission to activate or deactivate items.", ok: false });
+      return;
+    }
+    const next = !isMaterialActive(m);
+    const label = next ? "activate" : "deactivate";
+    if (
+      !window.confirm(
+        next
+          ? `Activate "${m.name}"? It will appear again in inward, outward, and purchase pickers.`
+          : `Deactivate "${m.name}"? It will be hidden from new entries but kept in history and stock.`,
+      )
+    ) {
+      return;
+    }
+    setTogglingId(m._id);
+    try {
+      const updated = await setMaterialActive(m._id, next);
+      setList((prev) =>
+        prev.map((row) =>
+          row._id === m._id ? { ...row, active: updated?.active ?? next } : row,
+        ),
+      );
+      setMsg({
+        text: `"${m.name}" ${label}d successfully.`,
+        ok: true,
+      });
+      setTimeout(() => setMsg({ text: "", ok: true }), 4000);
+    } catch (err) {
+      alert(err.message || `Could not ${label} material.`);
+    } finally {
+      setTogglingId(null);
     }
   }
 
@@ -442,13 +495,41 @@ const categoryOptions = useMemo(
       <div className="card card-wide">
         <h3>
           Materials <span className="pill-count">{list.length || 0}</span>
+          {msg.text && (
+            <span
+              className={`msg ${msg.ok ? "ok" : "err"}`}
+              style={{ marginLeft: 12, fontSize: 13, fontWeight: 400 }}
+            >
+              {msg.text}
+            </span>
+          )}
         </h3>
-        <div className="searchbar">
+        <div
+          className="searchbar"
+          style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}
+        >
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name or code…"
+            style={{ flex: "1 1 220px" }}
           />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { key: "all", label: `All (${list.length})` },
+              { key: "active", label: `Active (${activeCount})` },
+              { key: "inactive", label: `Inactive (${inactiveCount})` },
+            ].map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                className={`btn btn-sm ${statusFilter === opt.key ? "btn-in" : "btn-ghost"}`}
+                onClick={() => setStatusFilter(opt.key)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div
           className="tablewrap"
@@ -474,18 +555,22 @@ const categoryOptions = useMemo(
                 <th>Category</th>
                 <th>UOM</th>
                 <th className="num">Minimum stock</th>
+                <th>Status</th>
                 {!isViewerOnly && <th></th>}
               </tr>
             </thead>
             <tbody>
-              {pageItems.map((m) => (
+              {pageItems.map((m) => {
+                const active = isMaterialActive(m);
+                return (
                 <tr
                   key={m._id}
-                  style={
-                    editingId === m._id
+                  style={{
+                    ...(editingId === m._id
                       ? { background: "var(--teal-light, #eef7f6)" }
-                      : undefined
-                  }
+                      : {}),
+                    ...(!active ? { opacity: 0.72 } : {}),
+                  }}
                 >
                   <td style={{ fontWeight: 500 }}>{m.name}</td>
                   <td>{m.type}</td>
@@ -507,6 +592,21 @@ const categoryOptions = useMemo(
                       </span>
                     )}
                   </td>
+                  <td>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        background: active ? "#e6f6ed" : "#f3f0ea",
+                        color: active ? "#1b7a45" : "#8a8270",
+                      }}
+                    >
+                      {active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
                   {!isViewerOnly && (
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button
@@ -516,6 +616,22 @@ const categoryOptions = useMemo(
                       >
                         Edit
                       </button>
+                      {canToggleActive && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => handleToggleActive(m)}
+                          disabled={togglingId === m._id}
+                          title={active ? "Deactivate item" : "Activate item"}
+                          style={{ marginRight: 6 }}
+                        >
+                          {togglingId === m._id
+                            ? "…"
+                            : active
+                              ? "Deactivate"
+                              : "Activate"}
+                        </button>
+                      )}
                       <button
                         className="btn-del btn-sm"
                         onClick={() => handleDelete(m)}
@@ -526,7 +642,8 @@ const categoryOptions = useMemo(
                     </td>
                   )}
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
@@ -541,6 +658,11 @@ const categoryOptions = useMemo(
           <div className="empty">
             No materials yet.
             <p>Upload a sheet above or add materials manually.</p>
+          </div>
+        )}
+        {!!list.length && !filtered.length && (
+          <div className="empty">
+            No materials match this filter.
           </div>
         )}
       </div>

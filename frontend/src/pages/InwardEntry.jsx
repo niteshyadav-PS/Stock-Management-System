@@ -900,7 +900,7 @@ export default function InwardEntry() {
         }),
       ]);
       if (gen !== loadGen.current) return;
-      setMaster(unwrapList(m));
+      setMaster(unwrapList(m).filter((x) => x.active !== false));
       setPoList(Array.isArray(pos) ? pos : []);
       await entriesPromise;
     } catch (e) {

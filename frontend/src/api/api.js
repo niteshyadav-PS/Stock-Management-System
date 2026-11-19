@@ -97,6 +97,8 @@ function withQuery(path, params = {}) {
 export const getMaster = (params) => client.get(withQuery("/master", params || {}));
 export const addMaterial = (data) => client.post("/master", data);
 export const updateMaterial = (id, data) => client.put(`/master/${id}`, data);
+export const setMaterialActive = (id, active) =>
+  client.patch(`/master/${id}/active`, { active });
 export const bulkMaster = (materials) =>
   client.post("/master/bulk", { materials });
 export const deleteMaterial = (id) => client.delete(`/master/${id}`);

@@ -6,7 +6,11 @@ const materialSchema = new mongoose.Schema({
   code:     { type: String, default: '', trim: true },
   category: { type: String, default: '', trim: true },
   uom:      { type: String, default: '', trim: true },
-  minStock: { type: Number, default: 0, min: 0 }
+  minStock: { type: Number, default: 0, min: 0 },
+  // Soft-disable: inactive items stay in history/stock but are hidden from new picks.
+  active:   { type: Boolean, default: true },
 }, { timestamps: true });
+
+materialSchema.index({ active: 1 });
 
 module.exports = mongoose.model('Material', materialSchema);
