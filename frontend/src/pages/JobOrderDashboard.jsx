@@ -317,6 +317,110 @@ function lineMatchesKpi(line, kpiId) {
   return true;
 }
 
+/** Aggregate pipeline for a challan from its (possibly filtered) line totals. */
+function challanPipelineFromLines(lines, sample) {
+  const orderQty = lines.reduce((s, l) => s + num(l.orderQty), 0);
+  const ready = lines.reduce((s, l) => s + num(l.ready), 0);
+  const pending = lines.reduce((s, l) => s + num(l.pending), 0);
+  const rework = lines.reduce((s, l) => s + num(l.rework), 0);
+  const scrap = lines.reduce((s, l) => s + num(l.scrap), 0);
+  const dispatch = lines.reduce((s, l) => s + num(l.dispatch), 0);
+  const received = lines.reduce((s, l) => s + num(l.received), 0);
+  const receivable = lines.reduce((s, l) => s + num(l.receivable), 0);
+  if (orderQty > 0 && received >= orderQty - 0.001) return "Fully received";
+  if (sample?.orderStatus === "received") return "Fully received";
+  if (!sample?.acknowledged) return "Awaiting vendor receive";
+  if (pending > 0.001) return "With QC";
+  if (rework > 0.001) return "Rework open";
+  if (scrap > 0.001 && pending <= 0.001 && rework <= 0.001 && receivable <= 0.001) {
+    return "Rejected (scrap)";
+  }
+  if (receivable > 0.001) return "Ready to receive";
+  if (dispatch > 0.001 && received < dispatch - 0.001) return "Ready to dispatch";
+  if (orderQty > 0 && ready >= orderQty - 0.001) return "Inspection complete";
+  if (ready > 0.001) return "In process";
+  return "Waiting for vendor qty";
+}
+
+function pipelinePillClass(pipeline) {
+  if (
+    pipeline.includes("Awaiting")
+    || pipeline.includes("Rework")
+    || pipeline.includes("Rejected")
+  ) return "warn";
+  if (pipeline.includes("QC") || pipeline.includes("Partial")) return "amber";
+  if (pipeline.includes("receive") || pipeline.includes("dispatch")) return "teal";
+  if (pipeline.includes("complete") || pipeline.includes("Fully")) return "ok";
+  return "";
+}
+
+/** One parent row per challan; children are the item lines under that challan. */
+function groupLinesByChallan(lines) {
+  const map = new Map();
+  for (const line of lines || []) {
+    const key = String(line.orderId || line.srNo || line.key);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        orderId: line.orderId,
+        srNo: line.srNo,
+        date: line.date,
+        dcDateLabel: line.dcDateLabel,
+        jobType: line.jobType,
+        sendFromName: line.sendFromName,
+        sendToName: line.sendToName,
+        vendorName: line.vendorName,
+        expectedDate: line.expectedDate,
+        expectedLabel: line.expectedLabel,
+        orderStatus: line.orderStatus,
+        acknowledged: line.acknowledged,
+        lines: [],
+      });
+    }
+    map.get(key).lines.push(line);
+  }
+
+  return [...map.values()]
+    .map((g) => {
+      const orderQty = round3(g.lines.reduce((s, l) => s + num(l.orderQty), 0));
+      const ready = round3(g.lines.reduce((s, l) => s + num(l.ready), 0));
+      const dispatch = round3(g.lines.reduce((s, l) => s + num(l.dispatch), 0));
+      const received = round3(g.lines.reduce((s, l) => s + num(l.received), 0));
+      const receivable = round3(g.lines.reduce((s, l) => s + num(l.receivable), 0));
+      let deliveryDate = "";
+      let delayDays = null;
+      for (const l of g.lines) {
+        if (l.deliveryDate && (!deliveryDate || l.deliveryDate > deliveryDate)) {
+          deliveryDate = l.deliveryDate;
+        }
+        if (l.delayDays != null) {
+          if (delayDays == null || l.delayDays > delayDays) delayDays = l.delayDays;
+        }
+      }
+      return {
+        ...g,
+        lineCount: g.lines.length,
+        orderQty,
+        ready,
+        dispatch,
+        received,
+        receivable,
+        deliveryDate,
+        deliveryLabel: deliveryDate ? formatDate(deliveryDate) : "—",
+        delayDays,
+        delayLabel: delayDaysLabel(delayDays),
+        pipeline: challanPipelineFromLines(g.lines, g),
+      };
+    })
+    .sort((a, b) => {
+      const d = String(b.date || "").localeCompare(String(a.date || ""));
+      if (d) return d;
+      return String(a.srNo || "").localeCompare(String(b.srNo || ""), undefined, {
+        sensitivity: "base",
+      });
+    });
+}
+
 // Card value: "challans" = distinct challans, "lines" = matching item rows (same as table).
 const KPI_CARDS = [
   {
@@ -397,6 +501,7 @@ export default function JobOrderDashboard() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [vendorFilter, setVendorFilter] = useState("all");
   const [colFilters, setColFilters] = useState(EMPTY_COL_FILTERS);
+  const [expandedChallans, setExpandedChallans] = useState(() => new Set());
   const [panelKey, setPanelKey] = useState(0);
   const [viewOrder, setViewOrder] = useState(null);
   const [receiveOrder, setReceiveOrder] = useState(null);
@@ -582,6 +687,21 @@ export default function JobOrderDashboard() {
     () => new Set(filteredLines.map((l) => l.orderId)).size,
     [filteredLines],
   );
+
+  const challanGroups = useMemo(
+    () => groupLinesByChallan(filteredLines),
+    [filteredLines],
+  );
+
+  function toggleChallanExpand(orderId) {
+    const key = String(orderId);
+    setExpandedChallans((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   const vendorSummary = useMemo(() => {
     if (!q) return [];
@@ -1034,6 +1154,81 @@ export default function JobOrderDashboard() {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+        .jod-expand-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          max-width: 100%;
+          margin: 0;
+          padding: 2px 4px 2px 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          font: inherit;
+          font-weight: 700;
+          font-variant-numeric: tabular-nums;
+          letter-spacing: 0.02em;
+          cursor: pointer;
+          text-align: left;
+        }
+        .jod-expand-btn:hover { color: var(--teal-dark, #16483f); }
+        .jod-expand-btn:focus-visible {
+          outline: 2px solid #9bbbb3;
+          outline-offset: 2px;
+          border-radius: 4px;
+        }
+        .jod-chevron {
+          display: inline-flex;
+          width: 12px;
+          flex: 0 0 auto;
+          color: #8a8270;
+          font-size: 12px;
+          line-height: 1;
+          transition: transform 0.14s ease;
+        }
+        .jod-chevron.is-open { transform: rotate(90deg); }
+        .jod-line-count {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 5px;
+          border-radius: 999px;
+          background: #efeae0;
+          color: #5c5648;
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 1;
+        }
+        .jod-challan-row.is-open td {
+          background: #f7f4ec;
+          border-bottom-color: #e5dfd2;
+        }
+        .jod-line-row td {
+          background: #fbfaf6;
+          font-size: 12.5px;
+        }
+        .jod-line-row:hover td { background: #f5f2ea; }
+        .jod-line-item {
+          padding-left: 18px !important;
+          white-space: normal;
+          overflow: visible;
+        }
+        .jod-line-indent {
+          display: inline-block;
+          margin-right: 6px;
+          color: #8a8270;
+          font-weight: 600;
+        }
+        .jod-line-meta {
+          display: block;
+          margin-top: 2px;
+          margin-left: 16px;
+          font-size: 11px;
+          font-weight: 500;
+          color: #8a8270;
         }
         .jod-table .jod-vendor {
           font-weight: 600;
@@ -1489,11 +1684,11 @@ export default function JobOrderDashboard() {
         <div className="jod-panel-head">
           <div>
             <h3>
-              {q ? "Matching line details" : activeLabel}
+              {q ? "Matching challans" : activeLabel}
               <span className="pill-count">
-                {filteredLines.length} item{filteredLines.length === 1 ? "" : "s"}
-                {filteredChallanCount > 0
-                  ? ` · ${filteredChallanCount} challan${filteredChallanCount === 1 ? "" : "s"}`
+                {filteredChallanCount} challan{filteredChallanCount === 1 ? "" : "s"}
+                {filteredLines.length > 0
+                  ? ` · ${filteredLines.length} item${filteredLines.length === 1 ? "" : "s"}`
                   : ""}
               </span>
             </h3>
@@ -1502,8 +1697,8 @@ export default function JobOrderDashboard() {
         <div key={`lines-${panelKey}`} className="jod-panel-body">
           {loading ? (
             <div className="jod-empty">Loading…</div>
-          ) : filteredLines.length === 0 ? (
-            <div className="jod-empty">No lines in this view.</div>
+          ) : challanGroups.length === 0 ? (
+            <div className="jod-empty">No challans in this view.</div>
           ) : (
             <div className="jod-tablewrap">
               <table className="jod-table">
@@ -1606,73 +1801,160 @@ export default function JobOrderDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredLines.map((line) => {
-                    let pill = "";
-                    if (
-                      line.pipeline.includes("Awaiting")
-                      || line.pipeline.includes("Rework")
-                      || line.pipeline.includes("Rejected")
-                    ) pill = "warn";
-                    else if (line.pipeline.includes("QC") || line.pipeline.includes("Partial")) pill = "amber";
-                    else if (line.pipeline.includes("receive") || line.pipeline.includes("dispatch")) pill = "teal";
-                    else if (line.pipeline.includes("complete") || line.pipeline.includes("Fully")) pill = "ok";
-                    const rowTitle = [
-                      line.description,
-                      jobTypeLabel(line.jobType),
-                      line.projectName,
-                      line.process,
+                  {challanGroups.map((group) => {
+                    const expanded = expandedChallans.has(String(group.orderId));
+                    const pill = pipelinePillClass(group.pipeline);
+                    let delayClass = "jod-delay";
+                    if (group.delayDays != null && group.delayDays > 0) delayClass += " jod-delay-late";
+                    else if (group.delayDays != null && group.delayDays < 0) delayClass += " jod-delay-early";
+                    else if (group.delayDays === 0) delayClass += " jod-delay-ok";
+                    const parentTitle = [
+                      group.srNo,
+                      `${group.lineCount} item${group.lineCount === 1 ? "" : "s"}`,
+                      jobTypeLabel(group.jobType),
                     ]
                       .filter(Boolean)
                       .join(" · ");
-                    let delayClass = "jod-delay";
-                    if (line.delayDays != null && line.delayDays > 0) delayClass += " jod-delay-late";
-                    else if (line.delayDays != null && line.delayDays < 0) delayClass += " jod-delay-early";
-                    else if (line.delayDays === 0) delayClass += " jod-delay-ok";
                     return (
-                      <tr key={line.key} title={rowTitle}>
-                        <td className="mono jod-clip jod-challan">{line.srNo}</td>
-                        <td className="jod-clip jod-party" title={line.sendFromName}>{line.sendFromName}</td>
-                        <td className="jod-clip jod-party" title={line.sendToName}>{line.sendToName}</td>
-                        <td className="jod-clip jod-date">{line.dcDateLabel}</td>
-                        <td className="jod-clip jod-date">{line.expectedLabel}</td>
-                        <td className="jod-clip jod-date jod-hide-laptop">{line.deliveryLabel}</td>
-                        <td className="jod-clip jod-hide-laptop">
-                          {line.delayLabel === "—"
-                            ? "—"
-                            : <span className={delayClass}>{line.delayLabel}</span>}
-                        </td>
-                        <td className="num">{formatQty(line.orderQty)}</td>
-                        <td className="num">{formatQty(line.ready)}</td>
-                        <td className="num">{line.dispatch ? formatQty(line.dispatch) : "—"}</td>
-                        <td className="num">{formatQty(line.received)}</td>
-                        <td className="jod-status" title={line.pipeline}>
-                          <span className={`jod-pill${pill ? ` ${pill}` : ""}`}>{line.pipeline}</span>
-                        </td>
-                        <td className="jod-act">
-                          <div className="jod-act-btns">
+                      <React.Fragment key={group.key}>
+                        <tr
+                          className={`jod-challan-row${expanded ? " is-open" : ""}`}
+                          title={parentTitle}
+                        >
+                          <td className="mono jod-challan">
                             <button
                               type="button"
-                              className="jod-act-btn jod-act-btn--view"
-                              onClick={() => openOrder(line)}
+                              className="jod-expand-btn"
+                              onClick={() => toggleChallanExpand(group.orderId)}
+                              aria-expanded={expanded}
+                              aria-label={
+                                expanded
+                                  ? `Hide items for challan ${group.srNo}`
+                                  : `Show items for challan ${group.srNo}`
+                              }
                             >
-                              View
+                              <span className={`jod-chevron${expanded ? " is-open" : ""}`} aria-hidden="true">
+                                ▸
+                              </span>
+                              <span className="jod-clip">{group.srNo}</span>
+                              <span className="jod-line-count">
+                                {group.lineCount}
+                              </span>
                             </button>
-                            {canReceive && line.receivable > 0.0001 ? (
+                          </td>
+                          <td className="jod-clip jod-party" title={group.sendFromName}>{group.sendFromName}</td>
+                          <td className="jod-clip jod-party" title={group.sendToName}>{group.sendToName}</td>
+                          <td className="jod-clip jod-date">{group.dcDateLabel}</td>
+                          <td className="jod-clip jod-date">{group.expectedLabel}</td>
+                          <td className="jod-clip jod-date jod-hide-laptop">{group.deliveryLabel}</td>
+                          <td className="jod-clip jod-hide-laptop">
+                            {group.delayLabel === "—"
+                              ? "—"
+                              : <span className={delayClass}>{group.delayLabel}</span>}
+                          </td>
+                          <td className="num">{formatQty(group.orderQty)}</td>
+                          <td className="num">{formatQty(group.ready)}</td>
+                          <td className="num">{group.dispatch ? formatQty(group.dispatch) : "—"}</td>
+                          <td className="num">{formatQty(group.received)}</td>
+                          <td className="jod-status" title={group.pipeline}>
+                            <span className={`jod-pill${pill ? ` ${pill}` : ""}`}>{group.pipeline}</span>
+                          </td>
+                          <td className="jod-act">
+                            <div className="jod-act-btns">
                               <button
                                 type="button"
-                                className="jod-act-btn jod-act-btn--receive"
-                                disabled={receiveOpening}
-                                onClick={() => openReceive(line)}
-                                title="Receive ready material at store"
+                                className="jod-act-btn jod-act-btn--view"
+                                onClick={() => openOrder(group)}
                               >
-                                Receive
+                                View
                               </button>
-                            ) : (
-                              <span className="jod-act-slot" aria-hidden="true" />
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                              {canReceive && group.receivable > 0.0001 ? (
+                                <button
+                                  type="button"
+                                  className="jod-act-btn jod-act-btn--receive"
+                                  disabled={receiveOpening}
+                                  onClick={() => openReceive(group)}
+                                  title="Receive ready material at store"
+                                >
+                                  Receive
+                                </button>
+                              ) : (
+                                <span className="jod-act-slot" aria-hidden="true" />
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                        {expanded &&
+                          group.lines.map((line) => {
+                            const childPill = pipelinePillClass(line.pipeline);
+                            const rowTitle = [
+                              line.description,
+                              jobTypeLabel(line.jobType),
+                              line.projectName,
+                              line.process,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ");
+                            let childDelayClass = "jod-delay";
+                            if (line.delayDays != null && line.delayDays > 0) childDelayClass += " jod-delay-late";
+                            else if (line.delayDays != null && line.delayDays < 0) childDelayClass += " jod-delay-early";
+                            else if (line.delayDays === 0) childDelayClass += " jod-delay-ok";
+                            return (
+                              <tr key={line.key} className="jod-line-row" title={rowTitle}>
+                                <td className="jod-line-item" colSpan={3}>
+                                  <span className="jod-line-indent">↳</span>
+                                  <span className="jod-item">{line.description}</span>
+                                  {(line.projectName || line.process) && (
+                                    <span className="jod-line-meta">
+                                      {[line.projectName, line.process].filter(Boolean).join(" · ")}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="jod-clip jod-date">{line.dcDateLabel}</td>
+                                <td className="jod-clip jod-date">{line.expectedLabel}</td>
+                                <td className="jod-clip jod-date jod-hide-laptop">{line.deliveryLabel}</td>
+                                <td className="jod-clip jod-hide-laptop">
+                                  {line.delayLabel === "—"
+                                    ? "—"
+                                    : <span className={childDelayClass}>{line.delayLabel}</span>}
+                                </td>
+                                <td className="num">{formatQty(line.orderQty)}</td>
+                                <td className="num">{formatQty(line.ready)}</td>
+                                <td className="num">{line.dispatch ? formatQty(line.dispatch) : "—"}</td>
+                                <td className="num">{formatQty(line.received)}</td>
+                                <td className="jod-status" title={line.pipeline}>
+                                  <span className={`jod-pill${childPill ? ` ${childPill}` : ""}`}>
+                                    {line.pipeline}
+                                  </span>
+                                </td>
+                                <td className="jod-act">
+                                  <div className="jod-act-btns">
+                                    <button
+                                      type="button"
+                                      className="jod-act-btn jod-act-btn--view"
+                                      onClick={() => openOrder(line)}
+                                    >
+                                      View
+                                    </button>
+                                    {canReceive && line.receivable > 0.0001 ? (
+                                      <button
+                                        type="button"
+                                        className="jod-act-btn jod-act-btn--receive"
+                                        disabled={receiveOpening}
+                                        onClick={() => openReceive(line)}
+                                        title="Receive ready material at store"
+                                      >
+                                        Receive
+                                      </button>
+                                    ) : (
+                                      <span className="jod-act-slot" aria-hidden="true" />
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
