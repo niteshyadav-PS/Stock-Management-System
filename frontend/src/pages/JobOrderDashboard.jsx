@@ -1155,28 +1155,21 @@ export default function JobOrderDashboard() {
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        .jod-expand-btn {
+        .jod-challan-row {
+          cursor: pointer;
+        }
+        .jod-challan-row:focus-visible {
+          outline: 2px solid #9bbbb3;
+          outline-offset: -2px;
+        }
+        .jod-expand-label {
           display: inline-flex;
           align-items: center;
           gap: 6px;
           max-width: 100%;
-          margin: 0;
-          padding: 2px 4px 2px 0;
-          border: 0;
-          background: transparent;
-          color: inherit;
-          font: inherit;
           font-weight: 700;
           font-variant-numeric: tabular-nums;
           letter-spacing: 0.02em;
-          cursor: pointer;
-          text-align: left;
-        }
-        .jod-expand-btn:hover { color: var(--teal-dark, #16483f); }
-        .jod-expand-btn:focus-visible {
-          outline: 2px solid #9bbbb3;
-          outline-offset: 2px;
-          border-radius: 4px;
         }
         .jod-chevron {
           display: inline-flex;
@@ -1820,19 +1813,24 @@ export default function JobOrderDashboard() {
                         <tr
                           className={`jod-challan-row${expanded ? " is-open" : ""}`}
                           title={parentTitle}
+                          onClick={() => toggleChallanExpand(group.orderId)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              toggleChallanExpand(group.orderId);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={expanded}
+                          aria-label={
+                            expanded
+                              ? `Hide items for challan ${group.srNo}`
+                              : `Show items for challan ${group.srNo}`
+                          }
                         >
                           <td className="mono jod-challan">
-                            <button
-                              type="button"
-                              className="jod-expand-btn"
-                              onClick={() => toggleChallanExpand(group.orderId)}
-                              aria-expanded={expanded}
-                              aria-label={
-                                expanded
-                                  ? `Hide items for challan ${group.srNo}`
-                                  : `Show items for challan ${group.srNo}`
-                              }
-                            >
+                            <span className="jod-expand-label">
                               <span className={`jod-chevron${expanded ? " is-open" : ""}`} aria-hidden="true">
                                 ▸
                               </span>
@@ -1840,7 +1838,7 @@ export default function JobOrderDashboard() {
                               <span className="jod-line-count">
                                 {group.lineCount}
                               </span>
-                            </button>
+                            </span>
                           </td>
                           <td className="jod-clip jod-party" title={group.sendFromName}>{group.sendFromName}</td>
                           <td className="jod-clip jod-party" title={group.sendToName}>{group.sendToName}</td>
@@ -1859,7 +1857,11 @@ export default function JobOrderDashboard() {
                           <td className="jod-status" title={group.pipeline}>
                             <span className={`jod-pill${pill ? ` ${pill}` : ""}`}>{group.pipeline}</span>
                           </td>
-                          <td className="jod-act">
+                          <td
+                            className="jod-act"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
                             <div className="jod-act-btns">
                               <button
                                 type="button"
