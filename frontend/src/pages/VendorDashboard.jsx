@@ -25,6 +25,16 @@ function formatQty(n) {
   return Number.isFinite(v) ? String(v) : "—";
 }
 
+function showNum(v) {
+  return v === null || v === undefined || v === "" ? "—" : v;
+}
+
+function showArea(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
+
 function submittedReadyQty(item) {
   const total = (item?.qcRounds || []).reduce((sum, round) => {
     if (round.origin === "rework") return sum;
@@ -183,6 +193,7 @@ export default function VendorDashboard() {
   const [ackSaving, setAckSaving] = useState(false);
   const [ackErr, setAckErr] = useState("");
   const [ackQtyInputs, setAckQtyInputs] = useState([]);
+  const [expandedChallans, setExpandedChallans] = useState(() => new Set());
 
   const jobType =
     user?.vendorJobType === "fabrication" ? "fabrication" : "powder_coating";
@@ -264,6 +275,16 @@ export default function VendorDashboard() {
     if (id === active) return;
     setActive(id);
     setPanelKey((k) => k + 1);
+  }
+
+  function toggleChallanExpand(orderId) {
+    const key = String(orderId);
+    setExpandedChallans((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   function openReceive(order) {
@@ -514,6 +535,86 @@ export default function VendorDashboard() {
           transition: background 0.14s ease;
         }
         .vdash-table tbody tr:hover { background: #faf8f2; }
+        .vdash-challan-row {
+          cursor: pointer;
+        }
+        .vdash-challan-row:focus-visible {
+          outline: 2px solid #9bbbb3;
+          outline-offset: -2px;
+        }
+        .vdash-challan-row.is-open td {
+          background: #f7f4ec;
+          border-bottom-color: #e5dfd2;
+        }
+        .vdash-expand-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          max-width: 100%;
+        }
+        .vdash-chevron {
+          display: inline-flex;
+          width: 12px;
+          flex: 0 0 auto;
+          color: #8a8270;
+          font-size: 12px;
+          line-height: 1;
+          transition: transform 0.14s ease;
+        }
+        .vdash-chevron.is-open { transform: rotate(90deg); }
+        .vdash-line-count {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 5px;
+          border-radius: 999px;
+          background: #efeae0;
+          color: #5c5648;
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 1;
+        }
+        .vdash-line-row td {
+          background: #fbfaf6;
+          font-size: 12.5px;
+          padding-top: 10px;
+          padding-bottom: 10px;
+        }
+        .vdash-line-row:hover td { background: #f5f2ea; }
+        .vdash-line-item {
+          padding-left: 28px !important;
+          white-space: normal;
+        }
+        .vdash-line-indent {
+          display: inline-block;
+          margin-right: 6px;
+          color: #8a8270;
+          font-weight: 600;
+        }
+        .vdash-line-meta {
+          display: block;
+          margin-top: 2px;
+          margin-left: 16px;
+          font-size: 11px;
+          font-weight: 500;
+          color: #8a8270;
+        }
+        .vdash-line-params {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          margin-top: 6px;
+          margin-left: 16px;
+          font-size: 11px;
+          color: #5c5648;
+          font-variant-numeric: tabular-nums;
+        }
+        .vdash-line-params span strong {
+          font-weight: 700;
+          color: var(--ink);
+        }
         .vdash-challan {
           font-weight: 700;
           font-variant-numeric: tabular-nums;
@@ -790,45 +891,117 @@ export default function VendorDashboard() {
                 <tbody>
                   {listRows.map(({ order, stats }) => {
                     const status = statusMeta(stats);
+                    const expanded = expandedChallans.has(String(order._id));
+                    const items = order.items || [];
                     return (
-                      <tr key={order._id}>
-                        <td className="vdash-challan mono">{order.srNo}</td>
-                        <td>{formatDate(order.date)}</td>
-                        <td>{stats.itemCount}</td>
-                        <td>
-                          {stats.acknowledged ? (
-                            formatDate(order.vendorExpectedDate)
-                          ) : (
-                            <span style={{ color: "var(--text-3)" }}>—</span>
-                          )}
-                        </td>
-                        <td>{stats.readyDispatch ? formatQty(stats.readyDispatch) : "—"}</td>
-                        <td>
-                          <span className={`vdash-pill${status.tone ? ` ${status.tone}` : ""}`}>
-                            {status.label}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="vdash-actions">
-                            {stats.pendingReceive ? (
+                      <React.Fragment key={order._id}>
+                        <tr
+                          className={`vdash-challan-row${expanded ? " is-open" : ""}`}
+                          onClick={() => toggleChallanExpand(order._id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              toggleChallanExpand(order._id);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={expanded}
+                          aria-label={
+                            expanded
+                              ? `Hide items for challan ${order.srNo}`
+                              : `Show items for challan ${order.srNo}`
+                          }
+                        >
+                          <td className="vdash-challan mono">
+                            <span className="vdash-expand-label">
+                              <span
+                                className={`vdash-chevron${expanded ? " is-open" : ""}`}
+                                aria-hidden="true"
+                              >
+                                ▸
+                              </span>
+                              <span>{order.srNo}</span>
+                              <span className="vdash-line-count">{stats.itemCount}</span>
+                            </span>
+                          </td>
+                          <td>{formatDate(order.date)}</td>
+                          <td>{stats.itemCount}</td>
+                          <td>
+                            {stats.acknowledged ? (
+                              formatDate(order.vendorExpectedDate)
+                            ) : (
+                              <span style={{ color: "var(--text-3)" }}>—</span>
+                            )}
+                          </td>
+                          <td>{stats.readyDispatch ? formatQty(stats.readyDispatch) : "—"}</td>
+                          <td>
+                            <span className={`vdash-pill${status.tone ? ` ${status.tone}` : ""}`}>
+                              {status.label}
+                            </span>
+                          </td>
+                          <td
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            <div className="vdash-actions">
+                              {stats.pendingReceive ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-in btn-sm"
+                                  onClick={() => openReceive(order)}
+                                >
+                                  Receive
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
-                                className="btn btn-in btn-sm"
-                                onClick={() => openReceive(order)}
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => goToJobOrder(order)}
                               >
-                                Receive
+                                Open
                               </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => goToJobOrder(order)}
-                            >
-                              Open
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                            </div>
+                          </td>
+                        </tr>
+                        {expanded &&
+                          items.map((it, idx) => (
+                            <tr key={`${order._id}-${idx}`} className="vdash-line-row">
+                              <td className="vdash-line-item" colSpan={3}>
+                                <span className="vdash-line-indent">↳</span>
+                                <strong>{it.description || "—"}</strong>
+                                {(it.projectName || it.process) && (
+                                  <span className="vdash-line-meta">
+                                    {[it.projectName, it.process].filter(Boolean).join(" · ")}
+                                  </span>
+                                )}
+                                <div className="vdash-line-params">
+                                  <span>
+                                    Perimeter: <strong>{showNum(it.perimeter)}</strong>
+                                  </span>
+                                  <span>
+                                    Length: <strong>{showNum(it.length)}</strong>
+                                  </span>
+                                  <span>
+                                    Area/nos: <strong>{showArea(it.area)}</strong>
+                                  </span>
+                                  <span>
+                                    Qty: <strong>{formatQty(it.qty)} {it.unit || "NOS"}</strong>
+                                  </span>
+                                </div>
+                              </td>
+                              <td colSpan={3} />
+                              <td />
+                            </tr>
+                          ))}
+                        {expanded && items.length === 0 && (
+                          <tr className="vdash-line-row">
+                            <td colSpan={7} className="vdash-line-item">
+                              No items on this challan.
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -896,6 +1069,9 @@ export default function VendorDashboard() {
                       <tr>
                         <th>Sr</th>
                         <th>Item</th>
+                        <th>Perimeter (mm)</th>
+                        <th>Length (mm)</th>
+                        <th>Area/nos (Sq in)</th>
                         <th>Order qty</th>
                         <th>Received qty</th>
                         <th>UOM</th>
@@ -917,6 +1093,15 @@ export default function VendorDashboard() {
                             <td>{idx + 1}</td>
                             <td>
                               <strong>{it.description || "—"}</strong>
+                            </td>
+                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {showNum(it.perimeter)}
+                            </td>
+                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {showNum(it.length)}
+                            </td>
+                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {showArea(it.area)}
                             </td>
                             <td>{formatQty(it.qty)}</td>
                             <td>

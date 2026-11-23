@@ -33,6 +33,16 @@ function formatQty(n) {
   return Number.isFinite(v) ? String(v) : "—";
 }
 
+function showNum(v) {
+  return v === null || v === undefined || v === "" ? "—" : v;
+}
+
+function showArea(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
+
 function submittedReadyQty(item) {
   const total = (item?.qcRounds || []).reduce((sum, round) => {
     if (round.origin === "rework") return sum;
@@ -1541,7 +1551,10 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           text-overflow: ellipsis;
         }
         .vq-table col.vq-col-sr { width: 40px; }
-        .vq-table col.vq-col-desc { width: 18%; }
+        .vq-table col.vq-col-desc { width: 14%; }
+        .vq-table col.vq-col-perimeter { width: 78px; }
+        .vq-table col.vq-col-length { width: 72px; }
+        .vq-table col.vq-col-area { width: 78px; }
         .vq-table col.vq-col-qty { width: 58px; }
         .vq-table col.vq-col-uom { width: 48px; }
         .vq-table col.vq-col-process { width: 15%; }
@@ -2058,13 +2071,16 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           table-layout: fixed;
         }
         .vq-ack-items col.vq-ack-sr { width: 36px; }
-        .vq-ack-items col.vq-ack-item { width: 20%; }
+        .vq-ack-items col.vq-ack-item { width: 16%; }
+        .vq-ack-items col.vq-ack-perimeter { width: 78px; }
+        .vq-ack-items col.vq-ack-length { width: 72px; }
+        .vq-ack-items col.vq-ack-area { width: 78px; }
         .vq-ack-items col.vq-ack-qty { width: 70px; }
         .vq-ack-items col.vq-ack-recv { width: 100px; }
         .vq-ack-items col.vq-ack-uom { width: 52px; }
-        .vq-ack-items col.vq-ack-process { width: 16%; }
-        .vq-ack-items col.vq-ack-project { width: 12%; }
-        .vq-ack-items col.vq-ack-remark { width: 14%; }
+        .vq-ack-items col.vq-ack-process { width: 12%; }
+        .vq-ack-items col.vq-ack-project { width: 10%; }
+        .vq-ack-items col.vq-ack-remark { width: 10%; }
         .vq-ack-items input.vq-ack-qty-input {
           width: 100%;
           max-width: 88px;
@@ -2530,6 +2546,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                     <colgroup>
                       <col className="vq-col-sr" />
                       <col className="vq-col-desc" />
+                      <col className="vq-col-perimeter" />
+                      <col className="vq-col-length" />
+                      <col className="vq-col-area" />
                       <col className="vq-col-qty" />
                       <col className="vq-col-uom" />
                       <col className="vq-col-process" />
@@ -2542,6 +2561,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                       <tr>
                         <th>Sr</th>
                         <th>Item</th>
+                        <th className="num">Perimeter (mm)</th>
+                        <th className="num">Length (mm)</th>
+                        <th className="num">Area/nos (Sq in)</th>
                         <th className="num">Qty</th>
                         <th>UOM</th>
                         <th>Process / RAL</th>
@@ -2560,6 +2582,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                           <tr key={row.key}>
                             <td>{itemIndex + 1}</td>
                             <td className="vq-desc" title={row.item.description}>{row.item.description}</td>
+                            <td className="num">{showNum(row.item.perimeter)}</td>
+                            <td className="num">{showNum(row.item.length)}</td>
+                            <td className="num">{showArea(row.item.area)}</td>
                             <td className="num">{formatQty(row.item.qty)}</td>
                             <td className="vq-clip">{row.item.unit || "NOS"}</td>
                             <td className="vq-clip" title={row.item.process || ""}>{row.item.process || "—"}</td>
@@ -2739,6 +2764,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
               <div className="vq-modal-body">
                 <div className="vq-modal-meta">
                   <div><span>Order qty</span><strong>{formatQty(orderQty)} {liveItem.unit || "NOS"}</strong></div>
+                  <div><span>Perimeter (mm)</span><strong>{showNum(liveItem.perimeter)}</strong></div>
+                  <div><span>Length (mm)</span><strong>{showNum(liveItem.length)}</strong></div>
+                  <div><span>Area/nos (Sq in)</span><strong>{showArea(liveItem.area)}</strong></div>
                   <div><span>Ready qty</span><strong>{qtyWithPercent(sent, orderQty)}</strong></div>
                   <div><span>With QC</span><strong>{sliceQty ? qtyWithPercent(sliceQty, orderQty) : "—"}</strong></div>
                   <div><span>Ready to dispatch</span><strong>{qtyWithPercent(totals.dispatch, orderQty)}</strong></div>
@@ -3574,6 +3602,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                     <colgroup>
                       <col className="vq-ack-sr" />
                       <col className="vq-ack-item" />
+                      <col className="vq-ack-perimeter" />
+                      <col className="vq-ack-length" />
+                      <col className="vq-ack-area" />
                       <col className="vq-ack-qty" />
                       <col className="vq-ack-recv" />
                       <col className="vq-ack-uom" />
@@ -3585,6 +3616,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                       <tr>
                         <th>Sr</th>
                         <th>Item</th>
+                        <th className="num">Perimeter (mm)</th>
+                        <th className="num">Length (mm)</th>
+                        <th className="num">Area/nos (Sq in)</th>
                         <th className="num">Order qty</th>
                         <th className="num">Received qty</th>
                         <th>UOM</th>
@@ -3606,6 +3640,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
                           <tr key={idx}>
                             <td>{idx + 1}</td>
                             <td><strong>{it.description || "—"}</strong></td>
+                            <td className="num">{showNum(it.perimeter)}</td>
+                            <td className="num">{showNum(it.length)}</td>
+                            <td className="num">{showArea(it.area)}</td>
                             <td className="num">{formatQty(it.qty)}</td>
                             <td className="num">
                               <input
