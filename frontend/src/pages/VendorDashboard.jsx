@@ -666,8 +666,8 @@ export default function VendorDashboard() {
           to { opacity: 1; }
         }
         .vdash-modal {
-          width: min(720px, 100%);
-          max-height: min(86vh, 820px);
+          width: min(1180px, 96vw);
+          max-height: min(90vh, 900px);
           overflow: auto;
           background: #fff;
           border-radius: 12px;
@@ -721,13 +721,15 @@ export default function VendorDashboard() {
         .vdash-ack-scroll {
           border: 1px solid var(--line);
           border-radius: 8px;
-          overflow: auto;
-          max-height: 220px;
+          overflow-x: hidden;
+          overflow-y: auto;
+          max-height: 280px;
           margin-bottom: 14px;
         }
         .vdash-ack-scroll table {
           width: 100%;
           border-collapse: collapse;
+          table-layout: fixed;
           font-size: 12.5px;
         }
         .vdash-ack-scroll th,
@@ -736,6 +738,18 @@ export default function VendorDashboard() {
           border-bottom: 1px solid #ebe6d8;
           text-align: left;
           white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .vdash-ack-scroll th:nth-child(2),
+        .vdash-ack-scroll td:nth-child(2),
+        .vdash-ack-scroll th:nth-child(8),
+        .vdash-ack-scroll td:nth-child(8),
+        .vdash-ack-scroll th:nth-child(10),
+        .vdash-ack-scroll td:nth-child(10) {
+          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
         }
         .vdash-ack-scroll th {
           font-size: 10px;

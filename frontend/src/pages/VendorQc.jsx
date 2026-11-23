@@ -2061,7 +2061,9 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           border-bottom: 1px solid var(--line);
         }
         .vq-ack-items-scroll {
-          overflow-x: auto;
+          overflow-x: hidden;
+          overflow-y: auto;
+          max-height: 320px;
           -webkit-overflow-scrolling: touch;
         }
         .vq-ack-items table {
@@ -2281,7 +2283,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
           flex-direction: column;
         }
         .vq-modal.vq-modal--wide {
-          width: min(960px, 100%);
+          width: min(1180px, 96vw);
           max-width: 100%;
         }
         .vq-modal.vq-modal--qc-all {
