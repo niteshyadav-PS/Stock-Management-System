@@ -180,6 +180,37 @@ router.post('/assign-sub-category', authMiddleware, requireRole('admin','purchas
   }
 });
 
+// POST /api/master/migrate-sub-category
+// One-time: copy legacy itemGroup "Type · Category" into subCategory, keep itemGroup as type only.
+router.post('/migrate-sub-category', authMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const mats = await Material.find({
+      itemGroup: { $regex: '·' },
+      $or: [
+        { subCategory: { $exists: false } },
+        { subCategory: null },
+        { subCategory: '' },
+      ],
+    }).select('_id itemGroup');
+
+    let updated = 0;
+    for (const m of mats) {
+      const legacy = String(m.itemGroup || '').trim();
+      if (!legacy.includes('·')) continue;
+      const itemGroup = legacy.split('·')[0].trim();
+      await Material.updateOne(
+        { _id: m._id },
+        { $set: { subCategory: legacy, itemGroup } },
+      );
+      updated++;
+    }
+
+    res.json({ matched: mats.length, updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/master/:id/active — admin / purchase activate / deactivate
 router.patch('/:id/active', authMiddleware, requireRole('admin','purchase'), async (req, res) => {
   try {

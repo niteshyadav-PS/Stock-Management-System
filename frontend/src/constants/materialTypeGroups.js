@@ -46,20 +46,28 @@ export function formatSubCategory(type, category) {
   return `${t} · ${c}`;
 }
 
-/** Read sub category (Type · Category). */
+/**
+ * Sub Category = "TYPE · Category".
+ * Also reads legacy values still stored on itemGroup (before the rename).
+ */
 export function getSubCategory(row) {
-  return String(row?.subCategory || "").trim();
+  const sub = String(row?.subCategory || "").trim();
+  if (sub) return sub;
+  const legacy = String(row?.itemGroup || "").trim();
+  // Old "Item Group" field held the full Type · Category string.
+  if (legacy.includes("·")) return legacy;
+  return "";
 }
 
 /**
  * Item Group = chart type only (e.g. RAW MATERIALS).
- * Prefer stored itemGroup; otherwise parse from subCategory.
+ * Prefer stored type-only itemGroup; otherwise parse from subCategory / legacy.
  */
 export function getItemGroup(row) {
   const stored = String(row?.itemGroup || "").trim();
   if (stored && !stored.includes("·")) return stored;
-  const sub = getSubCategory(row) || stored;
-  if (!sub) return "";
+  const sub = getSubCategory(row);
   if (sub.includes("·")) return sub.split("·")[0].trim();
-  return sub;
+  if (stored.includes("·")) return stored.split("·")[0].trim();
+  return stored || "";
 }
