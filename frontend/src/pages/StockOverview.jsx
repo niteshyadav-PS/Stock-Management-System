@@ -9,6 +9,7 @@ import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import ColFilter from "../components/ColFilter";
 import { sortByColumn } from "../components/NumSort";
+import GroupTypeModal from "../components/GroupTypeModal";
 import { stockRowsFromSummary } from "../utils/stockMaps";
 import { buildCascadingColOpts } from "../utils/cascadingFilters";
 import {
@@ -125,6 +126,7 @@ export default function StockOverview() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const canSeePrice = user?.role === "admin" || user?.role === "purchase" || user?.role === "accounts";
+  const canSetItemGroup = user?.role === "admin" || user?.role === "purchase";
 
   const [master, setMaster] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -132,11 +134,13 @@ export default function StockOverview() {
   const [search, setSearch] = useState("");
   const [activeCard, setActiveCard] = useState(null);
   const [activeChart, setActiveChart] = useState("top-balance"); // which chart to show
+  const [itemGroupOpen, setItemGroupOpen] = useState(false);
 
   const [cf, setCf] = useState({
     name: [],
     type: [],
     category: [],
+    itemGroup: [],
     code: [],
     inQty: [],
     outQty: [],
@@ -284,6 +288,7 @@ export default function StockOverview() {
         name: (r) => r.name,
         type: (r) => r.type,
         category: (r) => r.category,
+        itemGroup: (r) => r.itemGroup || "",
         code: (r) => r.code,
         inQty: (r) => String(formatNum(r.inQty)),
         outQty: (r) => String(formatNum(r.outQty)),
@@ -303,6 +308,8 @@ export default function StockOverview() {
           (!cf.name.length || cf.name.includes(r.name)) &&
           (!cf.type.length || cf.type.includes(r.type)) &&
           (!cf.category.length || cf.category.includes(r.category)) &&
+          (!cf.itemGroup.length ||
+            cf.itemGroup.includes(r.itemGroup || "")) &&
           (!cf.code.length || cf.code.includes(r.code)) &&
           (!cf.inQty.length || cf.inQty.includes(String(formatNum(r.inQty)))) &&
           (!cf.outQty.length ||
@@ -344,6 +351,7 @@ export default function StockOverview() {
         "Material Name": r.name || "",
         Type: r.type || "",
         Category: r.category || "",
+        "Item Group": r.itemGroup || "",
         Code: r.code || "",
         Inward: Number(r.inQty.toFixed(2)),
         Outward: Number(r.outQty.toFixed(2)),
@@ -566,20 +574,39 @@ export default function StockOverview() {
           <h2>Live Stock</h2>
 <p>Monitor current stock availability with real-time balances calculated from inward and outward transactions.</p>
         </div>
-        <button
-          type="button"
-          className="btn btn-in btn-sm"
-          onClick={() => {
-            window.open(
-              `${window.location.origin}/embed/stock`,
-              "_blank",
-              "noopener,noreferrer",
-            );
-          }}
-        >
-          Open
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {canSetItemGroup && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setItemGroupOpen(true)}
+            >
+              Set Item Group
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-in btn-sm"
+            onClick={() => {
+              window.open(
+                `${window.location.origin}/embed/stock`,
+                "_blank",
+                "noopener,noreferrer",
+              );
+            }}
+          >
+            Open
+          </button>
+        </div>
       </div>
+
+      {itemGroupOpen && (
+        <GroupTypeModal
+          materials={master}
+          onClose={() => setItemGroupOpen(false)}
+          onSaved={load}
+        />
+      )}
 
       {/* ── Stat cards ── */}
       <div
@@ -1295,6 +1322,26 @@ export default function StockOverview() {
                       gap: 4,
                     }}
                   >
+                    Item Group{" "}
+                    <ColFilter
+                      values={colOpts.itemGroup}
+                      selected={cf.itemGroup}
+                      onChange={(v) => setCf((f) => ({ ...f, itemGroup: v }))}
+                      column="itemGroup"
+                      sortKind="text"
+                      sort={numSort}
+                      onSort={changeNumSort}
+                    />
+                  </span>
+                </th>
+                <th>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     Code{" "}
                     <ColFilter
                       values={colOpts.code}
@@ -1481,6 +1528,7 @@ export default function StockOverview() {
                     <td style={{ fontWeight: 500 }}>{r.name}</td>
                     <td>{r.type}</td>
                     <td>{r.category}</td>
+                    <td>{r.itemGroup || "—"}</td>
                     <td className="mono">{r.code}</td>
                     <td className="num">{formatNum(r.inQty)}</td>
                     <td className="num">{formatNum(r.outQty)}</td>

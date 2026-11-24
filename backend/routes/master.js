@@ -151,6 +151,29 @@ router.post('/bulk', authMiddleware, requireRole('admin','purchase'), async (req
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /api/master/assign-item-group
+// Sets display-only itemGroup. Never changes type/category or inward/outward.
+router.post('/assign-item-group', authMiddleware, requireRole('admin','purchase'), async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
+    const itemGroup = String(req.body?.itemGroup ?? '').trim();
+    if (!ids.length) return res.status(400).json({ error: 'Select at least one material.' });
+
+    const result = await Material.updateMany(
+      { _id: { $in: ids } },
+      { $set: { itemGroup } },
+    );
+
+    res.json({
+      materialsUpdated: result.modifiedCount || 0,
+      matched: result.matchedCount || 0,
+      itemGroup,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/master/:id/active — admin / purchase activate / deactivate
 router.patch('/:id/active', authMiddleware, requireRole('admin','purchase'), async (req, res) => {
   try {

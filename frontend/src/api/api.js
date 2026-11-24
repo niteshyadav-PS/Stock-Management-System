@@ -101,6 +101,9 @@ export const setMaterialActive = (id, active) =>
   client.patch(`/master/${id}/active`, { active });
 export const bulkMaster = (materials) =>
   client.post("/master/bulk", { materials });
+/** Display-only Live Stock grouping — does not change type/category. */
+export const assignItemGroup = (ids, itemGroup) =>
+  client.post("/master/assign-item-group", { ids, itemGroup });
 export const deleteMaterial = (id) => client.delete(`/master/${id}`);
 
 /** Past material names on inward+outward (for fixing renames done before sync). */
