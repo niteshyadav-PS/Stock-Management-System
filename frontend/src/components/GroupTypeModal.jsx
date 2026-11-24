@@ -375,7 +375,9 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
           )}
           {hasSelection && previewGroup && (
             <span style={{ fontSize: 12, color: "var(--text-3)" }}>
-              Will set Sub Category to: <strong>{previewGroup}</strong>
+              Will set Item Group: <strong>{newType}</strong>
+              {" · "}
+              Sub Category: <strong>{newCategory}</strong>
             </span>
           )}
         </div>
