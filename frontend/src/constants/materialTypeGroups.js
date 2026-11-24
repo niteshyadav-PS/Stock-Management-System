@@ -4,7 +4,7 @@ export const MATERIAL_TYPE_CATEGORY_MAP = {
     "Box Pipe",
     "C strut",
     "Plastics sheet",
-    "Alumin",
+    "Aluminium",
     "MS sheets",
     "Gasket",
     "Wiremesh",
