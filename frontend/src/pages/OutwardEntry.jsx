@@ -29,6 +29,7 @@ import {
   getBalanceFromMaps,
   sortNewestFirst,
 } from "../utils/stockMaps";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 const EMPTY_CF = {
   date: [],
@@ -665,35 +666,35 @@ export default function OutwardEntry() {
   );
 
   const colOpts = useMemo(
-    () => ({
-      date: searched.map((e) => formatDateDMY(e.date)),
-      project: searched.map((e) => e.project || "—"),
-      custpo: searched.map((e) => e.custpo || "—"),
-      slip: searched.map((e) => e.slip || "—"),
-      dept: searched.map((e) => e.dept || "—"),
-      recby: searched.map((e) => e.recby || "—"),
-      by: searched.map((e) => e.by || "—"),
-      name: searched.map((e) => e.name),
-      type: searched.map((e) => e.type),
-      code: searched.map((e) => e.code),
-      category: searched.map((e) => e.category),
-      reqty: searched.map((e) =>
-        e.reqty !== undefined && e.reqty !== null && e.reqty !== ""
-          ? String(formatNum(e.reqty))
-          : "—",
-      ),
-      qty: searched.map((e) => String(formatNum(e.qty))),
-      uom: searched.map((e) => e.uom),
-      remqty: searched.map((e) => {
-        const hasReqty =
-          e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
-        return hasReqty
-          ? String(formatNum(Number(e.reqty) - Number(e.qty)))
-          : "—";
+    () =>
+      buildCascadingColOpts(searched, cf, {
+        date: (e) => formatDateDMY(e.date),
+        project: (e) => e.project || "—",
+        custpo: (e) => e.custpo || "—",
+        slip: (e) => e.slip || "—",
+        dept: (e) => e.dept || "—",
+        recby: (e) => e.recby || "—",
+        by: (e) => e.by || "—",
+        name: (e) => e.name,
+        type: (e) => e.type,
+        code: (e) => e.code,
+        category: (e) => e.category,
+        reqty: (e) =>
+          e.reqty !== undefined && e.reqty !== null && e.reqty !== ""
+            ? String(formatNum(e.reqty))
+            : "—",
+        qty: (e) => String(formatNum(e.qty)),
+        uom: (e) => e.uom,
+        remqty: (e) => {
+          const hasReqty =
+            e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
+          return hasReqty
+            ? String(formatNum(Number(e.reqty) - Number(e.qty)))
+            : "—";
+        },
+        remarks: (e) => e.remarks || "—",
       }),
-      remarks: searched.map((e) => e.remarks || "—"),
-    }),
-    [searched],
+    [searched, cf],
   );
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =

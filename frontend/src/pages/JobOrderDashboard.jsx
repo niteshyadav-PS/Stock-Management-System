@@ -14,6 +14,7 @@ import {
   vendorMaterialCategory,
   vendorMaterialCategoryLabel,
 } from "../utils/jobOrderVendors";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 const RECEIVE_ROLES = ["admin", "store_manager", "store", "purchase", "viewer"];
 
@@ -663,25 +664,48 @@ export default function JobOrderDashboard() {
   }, [scopedLines, q, activeKpi, colFilters]);
 
   const colOpts = useMemo(() => {
-    const base = scopedLines.filter((l) => {
+    let base = scopedLines.filter((l) => {
       if (activeKpi !== "total" && !lineMatchesKpi(l, activeKpi)) return false;
       return true;
     });
-    return {
-      challan: base.map((l) => l.srNo),
-      sendFrom: base.map((l) => l.sendFromName),
-      sendTo: base.map((l) => l.sendToName),
-      dcDate: base.map((l) => l.dcDateLabel),
-      expected: base.map((l) => l.expectedLabel),
-      delivery: base.map((l) => l.deliveryLabel),
-      delay: base.map((l) => l.delayLabel),
-      orderQty: base.map((l) => formatQty(l.orderQty)),
-      ready: base.map((l) => formatQty(l.ready)),
-      dispatch: base.map((l) => (l.dispatch ? formatQty(l.dispatch) : "—")),
-      received: base.map((l) => formatQty(l.received)),
-      pipeline: base.map((l) => l.pipeline),
-    };
-  }, [scopedLines, activeKpi]);
+    if (q) {
+      base = base.filter((l) => {
+        const hay = normalize(
+          [
+            l.description,
+            l.projectName,
+            l.process,
+            l.srNo,
+            l.sendFromName,
+            l.sendToName,
+            l.vendorName,
+            l.categoryLabel,
+            l.dcDateLabel,
+            l.expectedLabel,
+            l.deliveryLabel,
+            l.delayLabel,
+            l.vehicleNo,
+            l.pipeline,
+          ].join(" "),
+        );
+        return hay.includes(q);
+      });
+    }
+    return buildCascadingColOpts(base, colFilters, {
+      challan: (l) => l.srNo,
+      sendFrom: (l) => l.sendFromName,
+      sendTo: (l) => l.sendToName,
+      dcDate: (l) => l.dcDateLabel,
+      expected: (l) => l.expectedLabel,
+      delivery: (l) => l.deliveryLabel,
+      delay: (l) => l.delayLabel,
+      orderQty: (l) => formatQty(l.orderQty),
+      ready: (l) => formatQty(l.ready),
+      dispatch: (l) => (l.dispatch ? formatQty(l.dispatch) : "—"),
+      received: (l) => formatQty(l.received),
+      pipeline: (l) => l.pipeline,
+    });
+  }, [scopedLines, activeKpi, q, colFilters]);
 
   const filteredChallanCount = useMemo(
     () => new Set(filteredLines.map((l) => l.orderId)).size,

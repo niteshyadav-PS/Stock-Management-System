@@ -248,7 +248,7 @@ export function flattenJobOrdersToItemRows(orders) {
   return rows;
 }
 
-export function filterItemRows(rows, filters = {}) {
+export function filterItemRows(rows, filters = {}, excludeKey = null) {
   const {
     jobType = "all",
     vendor = "all",
@@ -263,19 +263,40 @@ export function filterItemRows(rows, filters = {}) {
   const itemQ = normalizeKey(item);
 
   return (rows || []).filter((row) => {
-    if (jobType !== "all" && row.jobType !== jobType) return false;
-    if (vendor !== "all" && normalizeKey(row.vendorName) !== normalizeKey(vendor))
+    if (excludeKey !== "jobType" && jobType !== "all" && row.jobType !== jobType)
       return false;
     if (
+      excludeKey !== "vendor" &&
+      vendor !== "all" &&
+      normalizeKey(row.vendorName) !== normalizeKey(vendor)
+    )
+      return false;
+    if (
+      excludeKey !== "project" &&
       project !== "all" &&
       normalizeKey(row.projectName) !== normalizeKey(project)
     )
       return false;
-    if (category !== "all" && row.categoryId !== category) return false;
-    if (pipeline !== "all" && row.pipeline !== pipeline) return false;
+    if (
+      excludeKey !== "category" &&
+      category !== "all" &&
+      row.categoryId !== category
+    )
+      return false;
+    if (
+      excludeKey !== "pipeline" &&
+      pipeline !== "all" &&
+      row.pipeline !== pipeline
+    )
+      return false;
     if (dateFrom && (!row.date || row.date < dateFrom)) return false;
     if (dateTo && (!row.date || row.date > dateTo)) return false;
-    if (itemQ && !normalizeKey(row.description).includes(itemQ)) return false;
+    if (
+      excludeKey !== "item" &&
+      itemQ &&
+      !normalizeKey(row.description).includes(itemQ)
+    )
+      return false;
     return true;
   });
 }
@@ -559,6 +580,9 @@ export function collectFilterOptions(rows) {
   const vendors = new Map();
   const projects = new Map();
   const items = new Map();
+  const categories = new Map();
+  const pipelines = new Set();
+  const jobTypes = new Set();
   for (const row of rows || []) {
     if (row.vendorName && row.vendorName !== "—") {
       vendors.set(normalizeKey(row.vendorName), row.vendorName);
@@ -569,6 +593,11 @@ export function collectFilterOptions(rows) {
     if (row.description) {
       items.set(normalizeKey(row.description), row.description);
     }
+    if (row.categoryId) {
+      categories.set(row.categoryId, row.categoryLabel || row.categoryId);
+    }
+    if (row.pipeline) pipelines.add(row.pipeline);
+    if (row.jobType) jobTypes.add(row.jobType);
   }
   const sortVals = (map) =>
     [...map.values()].sort((a, b) =>
@@ -578,7 +607,71 @@ export function collectFilterOptions(rows) {
     vendors: sortVals(vendors),
     projects: sortVals(projects),
     items: sortVals(items),
+    categories: [...categories.entries()]
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) =>
+        a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
+      ),
+    pipelines: PIPELINE_STATUSES.filter((s) => pipelines.has(s)).concat(
+      [...pipelines].filter((s) => !PIPELINE_STATUSES.includes(s)).sort(),
+    ),
+    jobTypes: ["powder_coating", "fabrication"].filter((t) => jobTypes.has(t)),
   };
+}
+
+/**
+ * Cascading report filters: each select's options come from rows matching
+ * every other active filter (dates always apply).
+ */
+export function collectCascadingFilterOptions(rows, filters = {}) {
+  const withCurrent = (list, current, keyFn = (v) => v) => {
+    if (!current || current === "all") return list;
+    if (list.some((v) => keyFn(v) === keyFn(current))) return list;
+    return [current, ...list];
+  };
+
+  const vendors = withCurrent(
+    collectFilterOptions(filterItemRows(rows, filters, "vendor")).vendors,
+    filters.vendor,
+  );
+  const projects = withCurrent(
+    collectFilterOptions(filterItemRows(rows, filters, "project")).projects,
+    filters.project,
+  );
+  const items = collectFilterOptions(
+    filterItemRows(rows, filters, "item"),
+  ).items;
+
+  const catRows = collectFilterOptions(
+    filterItemRows(rows, filters, "category"),
+  ).categories;
+  let categories = catRows.length
+    ? catRows
+    : CATEGORY_OPTIONS.map((c) => ({ id: c.id, label: c.label }));
+  if (
+    filters.category &&
+    filters.category !== "all" &&
+    !categories.some((c) => c.id === filters.category)
+  ) {
+    const fallback =
+      CATEGORY_OPTIONS.find((c) => c.id === filters.category) || {
+        id: filters.category,
+        label: filters.category,
+      };
+    categories = [fallback, ...categories];
+  }
+
+  const pipelines = withCurrent(
+    collectFilterOptions(filterItemRows(rows, filters, "pipeline")).pipelines,
+    filters.pipeline,
+  );
+
+  const jobTypes = withCurrent(
+    collectFilterOptions(filterItemRows(rows, filters, "jobType")).jobTypes,
+    filters.jobType,
+  );
+
+  return { vendors, projects, items, categories, pipelines, jobTypes };
 }
 
 export function sumItemRows(rows) {

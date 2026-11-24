@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { sortNewestFirst } from "../utils/stockMaps";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 // Display dates as dd-mm-yyyy regardless of the underlying stored format.
 function toDDMMYYYY(dateStr) {
@@ -476,15 +477,36 @@ export default function PriceEntry() {
     return (entry?.price ?? 0) === 0;
   }
 
+  const searchScoped = useMemo(
+    () =>
+      entries.filter(
+        (e) =>
+          !search ||
+          e.name.toLowerCase().includes(search.toLowerCase()) ||
+          (e.code || "").toLowerCase().includes(search.toLowerCase()),
+      ),
+    [entries, search],
+  );
+
+  const colOpts = useMemo(
+    () =>
+      buildCascadingColOpts(searchScoped, cf, {
+        date: (e) => e.date,
+        month: (e) => toMonthKey(e.date),
+        vendor: (e) => e.vendor,
+        name: (e) => e.name,
+        code: (e) => e.code,
+        category: (e) => e.category,
+        qty: (e) => String(e.qty),
+        uom: (e) => e.uom,
+        price: (e) => String(e.price ?? 0),
+      }),
+    [searchScoped, cf],
+  );
+
   const filtered = useMemo(
     () =>
-      entries
-        .filter(
-          (e) =>
-            !search ||
-            e.name.toLowerCase().includes(search.toLowerCase()) ||
-            (e.code || "").toLowerCase().includes(search.toLowerCase()),
-        )
+      searchScoped
         .filter(
           (e) =>
             (!cf.date.length || cf.date.includes(e.date)) &&
@@ -504,7 +526,7 @@ export default function PriceEntry() {
           if (aZero !== bZero) return aZero - bZero;
           return sortNewestFirst(a, b);
         }),
-    [entries, search, cf],
+    [searchScoped, cf],
   );
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filtered, 25);
@@ -1186,7 +1208,7 @@ export default function PriceEntry() {
                   >
                     Date{" "}
                     <ColFilter
-                      values={entries.map((e) => e.date)}
+                      values={colOpts.date}
                       selected={cf.date}
                       onChange={(v) => setCf((f) => ({ ...f, date: v }))}
                       formatLabel={toDDMMYYYY}
@@ -1203,7 +1225,7 @@ export default function PriceEntry() {
                   >
                     Month{" "}
                     <ColFilter
-                      values={entries.map((e) => toMonthKey(e.date))}
+                      values={colOpts.month}
                       selected={cf.month}
                       onChange={(v) => setCf((f) => ({ ...f, month: v }))}
                       formatLabel={monthKeyToLabel}
@@ -1220,7 +1242,7 @@ export default function PriceEntry() {
                   >
                     Vendor{" "}
                     <ColFilter
-                      values={entries.map((e) => e.vendor)}
+                      values={colOpts.vendor}
                       selected={cf.vendor}
                       onChange={(v) => setCf((f) => ({ ...f, vendor: v }))}
                     />
@@ -1236,7 +1258,7 @@ export default function PriceEntry() {
                   >
                     Material{" "}
                     <ColFilter
-                      values={entries.map((e) => e.name)}
+                      values={colOpts.name}
                       selected={cf.name}
                       onChange={(v) => setCf((f) => ({ ...f, name: v }))}
                     />
@@ -1252,7 +1274,7 @@ export default function PriceEntry() {
                   >
                     Code{" "}
                     <ColFilter
-                      values={entries.map((e) => e.code)}
+                      values={colOpts.code}
                       selected={cf.code}
                       onChange={(v) => setCf((f) => ({ ...f, code: v }))}
                     />
@@ -1268,7 +1290,7 @@ export default function PriceEntry() {
                   >
                     Category{" "}
                     <ColFilter
-                      values={entries.map((e) => e.category)}
+                      values={colOpts.category}
                       selected={cf.category}
                       onChange={(v) => setCf((f) => ({ ...f, category: v }))}
                     />
@@ -1284,7 +1306,7 @@ export default function PriceEntry() {
                   >
                     Qty{" "}
                     <ColFilter
-                      values={entries.map((e) => String(e.qty))}
+                      values={colOpts.qty}
                       selected={cf.qty}
                       onChange={(v) => setCf((f) => ({ ...f, qty: v }))}
                     />
@@ -1300,7 +1322,7 @@ export default function PriceEntry() {
                   >
                     UOM{" "}
                     <ColFilter
-                      values={entries.map((e) => e.uom)}
+                      values={colOpts.uom}
                       selected={cf.uom}
                       onChange={(v) => setCf((f) => ({ ...f, uom: v }))}
                     />
@@ -1316,7 +1338,7 @@ export default function PriceEntry() {
                   >
                     Unit price{" "}
                     <ColFilter
-                      values={entries.map((e) => String(e.price ?? 0))}
+                      values={colOpts.price}
                       selected={cf.price}
                       onChange={(v) => setCf((f) => ({ ...f, price: v }))}
                     />

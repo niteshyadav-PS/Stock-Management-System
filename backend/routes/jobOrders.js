@@ -632,16 +632,7 @@ router.patch(
   },
 );
 
-// ── PATCH /api/job-orders/:id/receive — mark received (supports partial) ──────
-// items[] is positional and MUST align with order.items — the frontend builds
-// it by iterating order.items in order, so this holds as long as nothing
-// reorders order.items between fetch and submit.
-//
-// Partial receiving: for each item, `receiving` only needs to be <= remaining
-// (qty - receivedQty so far) — it does NOT have to equal the full remaining
-// amount. Whatever isn't received now just stays pending; status becomes
-// 'partial' until every item's receivedQty reaches its qty, at which point
-// status flips to 'received'.
+
 router.patch(
   "/:id/receive",
   authMiddleware,

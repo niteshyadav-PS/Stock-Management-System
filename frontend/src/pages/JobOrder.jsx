@@ -17,6 +17,7 @@ import {
   setJobOrderVendorsCache,
   vendorsForJobType,
 } from "../utils/jobOrderVendors";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 const JO_RENAME_FIELDS = [
   { key: "sendFromName", label: "Send From" },
@@ -4774,33 +4775,53 @@ export default function JobOrder({ jobType = "powder_coating" }) {
     partial: { bg: "#fef3c7", color: "#92400e" },
   };
 
-  const visible = useMemo(
-    () => {
-      const q = String(listSearch || "").trim().toLowerCase();
-      return orders.filter((o) => {
-        if (q) {
-          const itemHay = (o.items || [])
-            .map((it) =>
-              [it.description, it.projectName, it.process, it.location].join(" "),
-            )
-            .join(" ");
-          const hay = [
-            o.srNo,
-            formatDate(o.date),
-            o.sendFromName,
-            o.vendorName,
-            o.vehicleNo,
-            o.issuedBy,
-            o.deliveryAddress,
-            statusLabel(o),
-            qcSummary(o),
-            itemHay,
-          ]
-            .join(" ")
-            .toLowerCase();
-          if (!hay.includes(q)) return false;
-        }
+  const searchScopedOrders = useMemo(() => {
+    const q = String(listSearch || "").trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter((o) => {
+      const itemHay = (o.items || [])
+        .map((it) =>
+          [it.description, it.projectName, it.process, it.location].join(" "),
+        )
+        .join(" ");
+      const hay = [
+        o.srNo,
+        formatDate(o.date),
+        o.sendFromName,
+        o.vendorName,
+        o.vehicleNo,
+        o.issuedBy,
+        o.deliveryAddress,
+        statusLabel(o),
+        qcSummary(o),
+        itemHay,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [orders, listSearch]);
 
+  const colOpts = useMemo(
+    () =>
+      buildCascadingColOpts(searchScopedOrders, colFilters, {
+        challanNo: (o) => o.srNo,
+        date: (o) => formatDate(o.date),
+        sendFrom: (o) => o.sendFromName,
+        sendTo: (o) => o.vendorName,
+        vehicleNo: (o) => o.vehicleNo,
+        issuedBy: (o) => o.issuedBy,
+        dispatchedQty: (o) => String(orderDispatchedQty(o)),
+        receivedQty: (o) => String(orderReceivedQty(o)),
+        vendorExpected: (o) => vendorExpectedLabel(o),
+        status: (o) => statusLabel(o),
+      }),
+    [searchScopedOrders, colFilters],
+  );
+
+  const visible = useMemo(
+    () =>
+      searchScopedOrders.filter((o) => {
         const dispatchedQty = orderDispatchedQty(o);
         const receivedQty = orderReceivedQty(o);
 
@@ -4818,9 +4839,8 @@ export default function JobOrder({ jobType = "powder_coating" }) {
           return false;
         if (!matchesColFilter(colFilters.status, statusLabel(o))) return false;
         return true;
-      });
-    },
-    [orders, colFilters, listSearch],
+      }),
+    [searchScopedOrders, colFilters],
   );
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(visible, 25);
@@ -6277,7 +6297,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Challan{" "}
                       <ColFilter
-                        values={orders.map((o) => o.srNo)}
+                        values={colOpts.challanNo}
                         selected={colFilters.challanNo}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, challanNo: v }))
@@ -6289,7 +6309,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Date{" "}
                       <ColFilter
-                        values={orders.map((o) => formatDate(o.date))}
+                        values={colOpts.date}
                         selected={colFilters.date}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, date: v }))
@@ -6301,7 +6321,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Send From{" "}
                       <ColFilter
-                        values={orders.map((o) => o.sendFromName)}
+                        values={colOpts.sendFrom}
                         selected={colFilters.sendFrom}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, sendFrom: v }))
@@ -6313,7 +6333,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Send To{" "}
                       <ColFilter
-                        values={orders.map((o) => o.vendorName)}
+                        values={colOpts.sendTo}
                         selected={colFilters.sendTo}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, sendTo: v }))
@@ -6325,7 +6345,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Vehicle{" "}
                       <ColFilter
-                        values={orders.map((o) => o.vehicleNo)}
+                        values={colOpts.vehicleNo}
                         selected={colFilters.vehicleNo}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, vehicleNo: v }))
@@ -6337,7 +6357,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Issued By{" "}
                       <ColFilter
-                        values={orders.map((o) => o.issuedBy)}
+                        values={colOpts.issuedBy}
                         selected={colFilters.issuedBy}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, issuedBy: v }))
@@ -6349,9 +6369,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Disp{" "}
                       <ColFilter
-                        values={orders.map((o) =>
-                          String(orderDispatchedQty(o)),
-                        )}
+                        values={colOpts.dispatchedQty}
                         selected={colFilters.dispatchedQty}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, dispatchedQty: v }))
@@ -6363,7 +6381,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Recv{" "}
                       <ColFilter
-                        values={orders.map((o) => String(orderReceivedQty(o)))}
+                        values={colOpts.receivedQty}
                         selected={colFilters.receivedQty}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, receivedQty: v }))
@@ -6375,7 +6393,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Expected{" "}
                       <ColFilter
-                        values={orders.map((o) => vendorExpectedLabel(o))}
+                        values={colOpts.vendorExpected}
                         selected={colFilters.vendorExpected}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, vendorExpected: v }))
@@ -6388,7 +6406,7 @@ export default function JobOrder({ jobType = "powder_coating" }) {
                     <span className="jo-th-filter">
                       Status{" "}
                       <ColFilter
-                        values={orders.map((o) => statusLabel(o))}
+                        values={colOpts.status}
                         selected={colFilters.status}
                         onChange={(v) =>
                           setColFilters((f) => ({ ...f, status: v }))

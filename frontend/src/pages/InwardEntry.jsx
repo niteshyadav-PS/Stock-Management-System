@@ -30,6 +30,7 @@ import useClientPagination from "../hooks/useClientPagination";
 import { ThFilter } from "../components/ColFilter";
 import RenameFieldNames from "../components/RenameFieldNames";
 import { sortNewestFirst } from "../utils/stockMaps";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 const EMPTY_CF = {
   date: [],
@@ -989,27 +990,26 @@ export default function InwardEntry() {
   );
 
   const colOpts = useMemo(
-    () => ({
-      date: searched.map((e) => formatDateDMY(e.date)),
-      invdate: searched.map((e) =>
-        e.invdate ? formatDateDMY(e.invdate) : "—",
-      ),
-      challan: searched.map((e) => e.challan || "—"),
-      po: searched.map((e) => e.po || "—"),
-      vendor: searched.map((e) => e.vendor || "—"),
-      name: searched.map((e) => e.name),
-      type: searched.map((e) => e.type),
-      code: searched.map((e) => e.code),
-      category: searched.map((e) => e.category),
-      uom: searched.map((e) => e.uom),
-      qty: searched.map((e) => String(formatNum(e.qty))),
-      gin: searched.map((e) => e.gin || "—"),
-      by: searched.map((e) => e.by || "—"),
-      location: searched.map((e) => e.location || "—"),
-      remarks: searched.map((e) => e.remarks || "—"),
-      price: searched.map((e) => String(formatNum(e.price))),
-    }),
-    [searched],
+    () =>
+      buildCascadingColOpts(searched, cf, {
+        date: (e) => formatDateDMY(e.date),
+        invdate: (e) => (e.invdate ? formatDateDMY(e.invdate) : "—"),
+        challan: (e) => e.challan || "—",
+        po: (e) => e.po || "—",
+        vendor: (e) => e.vendor || "—",
+        name: (e) => e.name,
+        type: (e) => e.type,
+        code: (e) => e.code,
+        category: (e) => e.category,
+        uom: (e) => e.uom,
+        qty: (e) => String(formatNum(e.qty)),
+        gin: (e) => e.gin || "—",
+        by: (e) => e.by || "—",
+        location: (e) => e.location || "—",
+        remarks: (e) => e.remarks || "—",
+        price: (e) => String(formatNum(e.price)),
+      }),
+    [searched, cf],
   );
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =

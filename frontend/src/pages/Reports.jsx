@@ -8,6 +8,7 @@ import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { sortByColumn } from "../components/NumSort";
 import { stockRowsFromSummary, summaryToMaps } from "../utils/stockMaps";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 // ── Excel-style dropdown filter — portal-based, with Apply button ────────────
 function ColFilter({
@@ -543,18 +544,80 @@ export default function Reports() {
     return hasReqty(r) ? Number(r.reqty) - Number(r.qty) : null;
   }
 
-  const categories = [
-    ...new Set(master.map((m) => m.category).filter(Boolean)),
-  ].sort();
-  const vendors = [
-    ...new Set(inward.map((e) => e.vendor).filter(Boolean)),
-  ].sort();
-  const materials = [
-    ...new Set(master.map((m) => m.name).filter(Boolean)),
-  ].sort();
-  const projects = [
-    ...new Set(outward.map((e) => e.project).filter(Boolean)),
-  ].sort();
+  // Cascading top filters: each dropdown only lists values related to the
+  // other selected filters (Excel-style), scoped by report type + dates.
+  const filterSourceEntries = useMemo(() => {
+    if (repType === "inward") return inward;
+    if (repType === "outward") return outward;
+    return [...inward, ...outward];
+  }, [repType, inward, outward]);
+
+  const matchReportFiltersExcept = useCallback(
+    (e, excludeKey) => {
+      if (dateFrom && e.date < dateFrom) return false;
+      if (dateTo && e.date > dateTo) return false;
+      if (excludeKey !== "category" && category && e.category !== category)
+        return false;
+      if (excludeKey !== "vendor" && vendor && e.vendor !== vendor) return false;
+      if (excludeKey !== "material" && material && e.name !== material)
+        return false;
+      if (excludeKey !== "project" && project && e.project !== project)
+        return false;
+      return true;
+    },
+    [dateFrom, dateTo, category, vendor, material, project],
+  );
+
+  const uniqueSorted = (values, current) => {
+    const list = [...new Set((values || []).filter(Boolean))].sort((a, b) =>
+      String(a).localeCompare(String(b), undefined, { sensitivity: "base" }),
+    );
+    if (current && !list.includes(current)) return [current, ...list];
+    return list;
+  };
+
+  const categories = useMemo(() => {
+    const fromEntries = filterSourceEntries
+      .filter((e) => matchReportFiltersExcept(e, "category"))
+      .map((e) => e.category);
+    // Fall back to master categories when no entry data yet / empty scope.
+    const base =
+      fromEntries.some(Boolean) || filterSourceEntries.length
+        ? fromEntries
+        : master.map((m) => m.category);
+    return uniqueSorted(base, category);
+  }, [filterSourceEntries, matchReportFiltersExcept, master, category]);
+
+  const vendors = useMemo(() => {
+    const src = repType === "outward" ? [] : inward;
+    return uniqueSorted(
+      src
+        .filter((e) => matchReportFiltersExcept(e, "vendor"))
+        .map((e) => e.vendor),
+      vendor,
+    );
+  }, [repType, inward, matchReportFiltersExcept, vendor]);
+
+  const materials = useMemo(() => {
+    const fromEntries = filterSourceEntries
+      .filter((e) => matchReportFiltersExcept(e, "material"))
+      .map((e) => e.name);
+    const base =
+      fromEntries.some(Boolean) || filterSourceEntries.length
+        ? fromEntries
+        : master.map((m) => m.name);
+    return uniqueSorted(base, material);
+  }, [filterSourceEntries, matchReportFiltersExcept, master, material]);
+
+  const projects = useMemo(() => {
+    const src = repType === "inward" ? [] : outward;
+    return uniqueSorted(
+      src
+        .filter((e) => matchReportFiltersExcept(e, "project"))
+        .map((e) => e.project),
+      project,
+    );
+  }, [repType, outward, matchReportFiltersExcept, project]);
 
   // Weighted average unit price per material from inward receipts
   // (inward amount ÷ priced inward qty), same figure as Live Stock.
@@ -796,6 +859,50 @@ export default function Reports() {
       );
     }
   }
+
+  const colOptsBoth = useMemo(
+    () =>
+      buildCascadingColOpts(rows || [], cfBoth, {
+        name: (r) => r.name,
+        type: (r) => r.type,
+        category: (r) => r.category,
+        code: (r) => r.code,
+        uom: (r) => r.uom,
+        inQty: (r) => String(formatNum(r.inQty)),
+        outQty: (r) => String(formatNum(r.outQty)),
+        balance: (r) => String(formatNum(r.balance)),
+        minStock: (r) => String(formatNum(r.minStock)),
+        avgPrice: (r) => String(formatINR(r.avgPrice)),
+        stockVal: (r) => String(formatINR(r.stockVal)),
+      }),
+    [rows, cfBoth],
+  );
+
+  const colOptsTxn = useMemo(
+    () =>
+      buildCascadingColOpts(rows || [], cfTxn, {
+        date: (r) => r.date,
+        name: (r) => r.name,
+        category: (r) => r.category,
+        code: (r) => r.code,
+        uom: (r) => r.uom,
+        qty: (r) => String(formatNum(r.qty)),
+        reqty: (r) => (hasReqty(r) ? String(formatNum(r.reqty)) : "—"),
+        remaining: (r) =>
+          hasReqty(r) ? String(formatNum(remainingQty(r))) : "—",
+        vendor: (r) => r.vendor || "—",
+        price: (r) => String(formatINR(r.price)),
+        value: (r) =>
+          String(
+            formatINR((parseFloat(r.qty) || 0) * (parseFloat(r.price) || 0)),
+          ),
+        avgPrice: (r) => String(formatINR(avgPriceFor(r.name))),
+        evaluation: (r) => String(formatINR(evaluationFor(r))),
+        project: (r) => r.project || "—",
+        remarks: (r) => r.remarks || "—",
+      }),
+    [rows, cfTxn, inwardAvgByName],
+  );
 
   // ── Apply column filters ───────────────────────────────────────────────────
   const filteredRows = useMemo(() => (rows || []).filter((r) => {
@@ -1202,7 +1309,7 @@ export default function Reports() {
                         <th>
                           Material name{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.name)}
+                            values={colOptsBoth.name}
                             selected={cfBoth.name}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, name: v }))
@@ -1216,7 +1323,7 @@ export default function Reports() {
                         <th>
                           Type{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.type)}
+                            values={colOptsBoth.type}
                             selected={cfBoth.type}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, type: v }))
@@ -1230,7 +1337,7 @@ export default function Reports() {
                         <th>
                           Category{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.category)}
+                            values={colOptsBoth.category}
                             selected={cfBoth.category}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, category: v }))
@@ -1244,7 +1351,7 @@ export default function Reports() {
                         <th>
                           Code{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.code)}
+                            values={colOptsBoth.code}
                             selected={cfBoth.code}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, code: v }))
@@ -1258,7 +1365,7 @@ export default function Reports() {
                         <th>
                           UOM{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.uom)}
+                            values={colOptsBoth.uom}
                             selected={cfBoth.uom}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, uom: v }))
@@ -1272,7 +1379,7 @@ export default function Reports() {
                         <th className="num" style={{ color: "var(--green)" }}>
                           IN{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => formatNum(r.inQty))}
+                            values={colOptsBoth.inQty}
                             selected={cfBoth.inQty}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, inQty: v }))
@@ -1286,9 +1393,7 @@ export default function Reports() {
                         <th className="num" style={{ color: "var(--red)" }}>
                           Out{" "}
                           <ColFilter
-                            values={(rows || []).map((r) =>
-                              formatNum(r.outQty),
-                            )}
+                            values={colOptsBoth.outQty}
                             selected={cfBoth.outQty}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, outQty: v }))
@@ -1302,9 +1407,7 @@ export default function Reports() {
                         <th className="num" style={{ color: "var(--amber)" }}>
                           Bal.{" "}
                           <ColFilter
-                            values={(rows || []).map((r) =>
-                              formatNum(r.balance),
-                            )}
+                            values={colOptsBoth.balance}
                             selected={cfBoth.balance}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, balance: v }))
@@ -1318,9 +1421,7 @@ export default function Reports() {
                         <th className="num">
                           Min. Stock{" "}
                           <ColFilter
-                            values={(rows || []).map((r) =>
-                              formatNum(r.minStock),
-                            )}
+                            values={colOptsBoth.minStock}
                             selected={cfBoth.minStock}
                             onChange={(v) =>
                               setCfBoth((f) => ({ ...f, minStock: v }))
@@ -1336,9 +1437,7 @@ export default function Reports() {
                             <th className="num">
                               Avg price{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  formatINR(r.avgPrice),
-                                )}
+                                values={colOptsBoth.avgPrice}
                                 selected={cfBoth.avgPrice}
                                 onChange={(v) =>
                                   setCfBoth((f) => ({ ...f, avgPrice: v }))
@@ -1352,9 +1451,7 @@ export default function Reports() {
                             <th className="num">
                               Stock value{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  formatINR(r.stockVal),
-                                )}
+                                values={colOptsBoth.stockVal}
                                 selected={cfBoth.stockVal}
                                 onChange={(v) =>
                                   setCfBoth((f) => ({ ...f, stockVal: v }))
@@ -1407,7 +1504,7 @@ export default function Reports() {
                         <th>
                           Date{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.date)}
+                            values={colOptsTxn.date}
                             selected={cfTxn.date}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, date: v }))
@@ -1422,7 +1519,7 @@ export default function Reports() {
                         <th>
                           Material{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.name)}
+                            values={colOptsTxn.name}
                             selected={cfTxn.name}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, name: v }))
@@ -1436,7 +1533,7 @@ export default function Reports() {
                         <th>
                           Category{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.category)}
+                            values={colOptsTxn.category}
                             selected={cfTxn.category}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, category: v }))
@@ -1450,7 +1547,7 @@ export default function Reports() {
                         <th>
                           Code{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.code)}
+                            values={colOptsTxn.code}
                             selected={cfTxn.code}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, code: v }))
@@ -1464,7 +1561,7 @@ export default function Reports() {
                         <th>
                           UOM{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.uom)}
+                            values={colOptsTxn.uom}
                             selected={cfTxn.uom}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, uom: v }))
@@ -1478,7 +1575,7 @@ export default function Reports() {
                         <th className="num">
                           Qty{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => formatNum(r.qty))}
+                            values={colOptsTxn.qty}
                             selected={cfTxn.qty}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, qty: v }))
@@ -1494,9 +1591,7 @@ export default function Reports() {
                             <th className="num">
                               Req. Qty{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  hasReqty(r) ? formatNum(r.reqty) : "—",
-                                )}
+                                values={colOptsTxn.reqty}
                                 selected={cfTxn.reqty}
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, reqty: v }))
@@ -1510,11 +1605,7 @@ export default function Reports() {
                             <th className="num">
                               Rem. Qty{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  hasReqty(r)
-                                    ? formatNum(remainingQty(r))
-                                    : "—",
-                                )}
+                                values={colOptsTxn.remaining}
                                 selected={cfTxn.remaining}
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, remaining: v }))
@@ -1532,9 +1623,7 @@ export default function Reports() {
                             <th className="num">
                               Avg price{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  formatINR(avgPriceFor(r.name)),
-                                )}
+                                values={colOptsTxn.avgPrice}
                                 selected={cfTxn.avgPrice}
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, avgPrice: v }))
@@ -1548,9 +1637,7 @@ export default function Reports() {
                             <th className="num">
                               Evaluation{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  formatINR(evaluationFor(r)),
-                                )}
+                                values={colOptsTxn.evaluation}
                                 selected={cfTxn.evaluation}
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, evaluation: v }))
@@ -1567,7 +1654,7 @@ export default function Reports() {
                           <th>
                             Vendor{" "}
                             <ColFilter
-                              values={(rows || []).map((r) => r.vendor || "—")}
+                              values={colOptsTxn.vendor}
                               selected={cfTxn.vendor}
                               onChange={(v) =>
                                 setCfTxn((f) => ({ ...f, vendor: v }))
@@ -1584,9 +1671,7 @@ export default function Reports() {
                             <th className="num">
                               Price{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  formatINR(r.price),
-                                )}
+                                values={colOptsTxn.price}
                                 selected={cfTxn.price}
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, price: v }))
@@ -1600,12 +1685,7 @@ export default function Reports() {
                             <th className="num">
                               Value{" "}
                               <ColFilter
-                                values={(rows || []).map((r) =>
-                                  formatINR(
-                                    (parseFloat(r.qty) || 0) *
-                                      (parseFloat(r.price) || 0),
-                                  ),
-                                )}
+                                values={colOptsTxn.value}
                                 selected={cfTxn.value}
                                 onChange={(v) =>
                                   setCfTxn((f) => ({ ...f, value: v }))
@@ -1622,7 +1702,7 @@ export default function Reports() {
                           <th>
                             Project{" "}
                             <ColFilter
-                              values={(rows || []).map((r) => r.project || "—")}
+                              values={colOptsTxn.project}
                               selected={cfTxn.project}
                               onChange={(v) =>
                                 setCfTxn((f) => ({ ...f, project: v }))
@@ -1637,7 +1717,7 @@ export default function Reports() {
                         <th className="col-remarks">
                           Remarks{" "}
                           <ColFilter
-                            values={(rows || []).map((r) => r.remarks || "—")}
+                            values={colOptsTxn.remarks}
                             selected={cfTxn.remarks}
                             onChange={(v) =>
                               setCfTxn((f) => ({ ...f, remarks: v }))

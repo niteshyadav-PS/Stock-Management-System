@@ -18,6 +18,7 @@ import { formatNum, todayStr } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { stockMapFromSummary } from "../utils/stockMaps";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 const CREATOR_ROLES  = ["admin", "store", "store_manager",  "viewer"];
 const APPROVER_ROLES = ["admin", "store_manager"];
@@ -964,10 +965,31 @@ export default function PurchaseRequest() {
 
   const materialQ = materialSearch.trim();
 
+  const filterBase = useMemo(
+    () =>
+      statusScoped.filter(
+        (pr) => !materialQ || prHasMaterial(pr, materialQ),
+      ),
+    [statusScoped, materialQ],
+  );
+
+  const colOpts = useMemo(
+    () =>
+      buildCascadingColOpts(filterBase, colFilters, {
+        prNumber: (p) => p.prNumber,
+        date: (p) => formatDDMMYYYY(p.date),
+        projectName: (p) => p.projectName || "—",
+        requestFrom: (p) => p.requestFrom || "—",
+        requestedBy: (p) => p.requestedByName,
+        items: (p) => String((p.items || []).length),
+        status: (p) => STATUS_LABEL[p.status] || p.status,
+      }),
+    [filterBase, colFilters],
+  );
+
   const visible = useMemo(
     () =>
-      statusScoped.filter((pr) => {
-        if (materialQ && !prHasMaterial(pr, materialQ)) return false;
+      filterBase.filter((pr) => {
         if (
           colFilters.prNumber.length &&
           !colFilters.prNumber.includes(pr.prNumber)
@@ -1005,7 +1027,7 @@ export default function PurchaseRequest() {
           return false;
         return true;
       }),
-    [statusScoped, materialQ, colFilters],
+    [filterBase, colFilters],
   );
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
@@ -1491,7 +1513,7 @@ export default function PurchaseRequest() {
                 <th>
                   <ThFilter
                     label="PR No"
-                    values={statusScoped.map((p) => p.prNumber)}
+                    values={colOpts.prNumber}
                     selected={colFilters.prNumber}
                     onChange={(v) =>
                       setColFilters((f) => ({ ...f, prNumber: v }))
@@ -1501,7 +1523,7 @@ export default function PurchaseRequest() {
                 <th>
                   <ThFilter
                     label="Date"
-                    values={statusScoped.map((p) => formatDDMMYYYY(p.date))}
+                    values={colOpts.date}
                     selected={colFilters.date}
                     onChange={(v) => setColFilters((f) => ({ ...f, date: v }))}
                   />
@@ -1509,7 +1531,7 @@ export default function PurchaseRequest() {
                 <th>
                   <ThFilter
                     label="Project Name"
-                    values={statusScoped.map((p) => p.projectName || "—")}
+                    values={colOpts.projectName}
                     selected={colFilters.projectName}
                     onChange={(v) =>
                       setColFilters((f) => ({ ...f, projectName: v }))
@@ -1519,7 +1541,7 @@ export default function PurchaseRequest() {
                 <th>
                   <ThFilter
                     label="Request From"
-                    values={statusScoped.map((p) => p.requestFrom || "—")}
+                    values={colOpts.requestFrom}
                     selected={colFilters.requestFrom}
                     onChange={(v) =>
                       setColFilters((f) => ({ ...f, requestFrom: v }))
@@ -1529,7 +1551,7 @@ export default function PurchaseRequest() {
                 <th>
                   <ThFilter
                     label="Requested by"
-                    values={statusScoped.map((p) => p.requestedByName)}
+                    values={colOpts.requestedBy}
                     selected={colFilters.requestedBy}
                     onChange={(v) =>
                       setColFilters((f) => ({ ...f, requestedBy: v }))
@@ -1539,9 +1561,7 @@ export default function PurchaseRequest() {
                 <th>
                   <ThFilter
                     label="Items"
-                    values={statusScoped.map((p) =>
-                      String((p.items || []).length),
-                    )}
+                    values={colOpts.items}
                     selected={colFilters.items}
                     onChange={(v) => setColFilters((f) => ({ ...f, items: v }))}
                   />
@@ -1549,9 +1569,7 @@ export default function PurchaseRequest() {
                 <th>
                   <ThFilter
                     label="Status"
-                    values={statusScoped.map(
-                      (p) => STATUS_LABEL[p.status] || p.status,
-                    )}
+                    values={colOpts.status}
                     selected={colFilters.status}
                     onChange={(v) =>
                       setColFilters((f) => ({ ...f, status: v }))

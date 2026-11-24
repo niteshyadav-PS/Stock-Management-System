@@ -5,15 +5,14 @@ import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { setJobOrderVendorsCache } from "../utils/jobOrderVendors";
 import {
-  CATEGORY_OPTIONS,
-  PIPELINE_STATUSES,
   REPORT_VIEW_MODES,
-  collectFilterOptions,
+  collectCascadingFilterOptions,
   filterItemRows,
   flattenJobOrdersToItemRows,
   formatReportDate,
   formatReportQty,
   groupItemRows,
+  jobTypeLabel,
   sumItemRows,
 } from "../utils/jobOrderReport";
 
@@ -68,8 +67,8 @@ export default function JobOrderReport() {
   );
 
   const filterOptions = useMemo(
-    () => collectFilterOptions(allRows),
-    [allRows],
+    () => collectCascadingFilterOptions(allRows, filters),
+    [allRows, filters],
   );
 
   const filteredRows = useMemo(
@@ -278,8 +277,11 @@ export default function JobOrderReport() {
               onChange={(e) => patchFilter({ jobType: e.target.value })}
             >
               <option value="all">All</option>
-              <option value="powder_coating">Powder Coating</option>
-              <option value="fabrication">Fabrication</option>
+              {(filterOptions.jobTypes || []).map((t) => (
+                <option key={t} value={t}>
+                  {jobTypeLabel(t)}
+                </option>
+              ))}
             </select>
           </div>
           <div className="field">
@@ -317,7 +319,7 @@ export default function JobOrderReport() {
               onChange={(e) => patchFilter({ category: e.target.value })}
             >
               <option value="all">All categories</option>
-              {CATEGORY_OPTIONS.map((c) => (
+              {(filterOptions.categories || []).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.label}
                 </option>
@@ -331,7 +333,7 @@ export default function JobOrderReport() {
               onChange={(e) => patchFilter({ pipeline: e.target.value })}
             >
               <option value="all">All statuses</option>
-              {PIPELINE_STATUSES.map((s) => (
+              {(filterOptions.pipelines || []).map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>

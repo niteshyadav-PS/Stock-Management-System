@@ -10,6 +10,7 @@ import useClientPagination from "../hooks/useClientPagination";
 import ColFilter from "../components/ColFilter";
 import { sortByColumn } from "../components/NumSort";
 import { stockRowsFromSummary } from "../utils/stockMaps";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 import {
   BarChart,
   Bar,
@@ -267,33 +268,55 @@ export default function StockOverview() {
     [allRows, search],
   );
 
+  const cardScoped = useMemo(
+    () =>
+      searched.filter((r) => {
+        if (activeCard === "low") return r.minStock > 0 && r.stock < r.minStock;
+        if (activeCard === "zero") return r.stock <= 0;
+        return true;
+      }),
+    [searched, activeCard],
+  );
+
+  const colOpts = useMemo(
+    () =>
+      buildCascadingColOpts(cardScoped, cf, {
+        name: (r) => r.name,
+        type: (r) => r.type,
+        category: (r) => r.category,
+        code: (r) => r.code,
+        inQty: (r) => String(formatNum(r.inQty)),
+        outQty: (r) => String(formatNum(r.outQty)),
+        stock: (r) => String(formatNum(r.stock)),
+        minStock: (r) => String(formatNum(r.minStock)),
+        uom: (r) => r.uom,
+        avgPrice: (r) => String(formatINR(r.avgPrice)),
+        totalVal: (r) => String(formatINR(r.totalVal)),
+      }),
+    [cardScoped, cf],
+  );
+
   const rows = useMemo(
     () =>
-      searched
-        .filter((r) => {
-          if (activeCard === "low") return r.minStock > 0 && r.stock < r.minStock;
-          if (activeCard === "zero") return r.stock <= 0;
-          return true;
-        })
-        .filter(
-          (r) =>
-            (!cf.name.length || cf.name.includes(r.name)) &&
-            (!cf.type.length || cf.type.includes(r.type)) &&
-            (!cf.category.length || cf.category.includes(r.category)) &&
-            (!cf.code.length || cf.code.includes(r.code)) &&
-            (!cf.inQty.length || cf.inQty.includes(String(formatNum(r.inQty)))) &&
-            (!cf.outQty.length ||
-              cf.outQty.includes(String(formatNum(r.outQty)))) &&
-            (!cf.stock.length || cf.stock.includes(String(formatNum(r.stock)))) &&
-            (!cf.minStock.length ||
-              cf.minStock.includes(String(formatNum(r.minStock)))) &&
-            (!cf.uom.length || cf.uom.includes(r.uom)) &&
-            (!cf.avgPrice.length ||
-              cf.avgPrice.includes(String(formatINR(r.avgPrice)))) &&
-            (!cf.totalVal.length ||
-              cf.totalVal.includes(String(formatINR(r.totalVal)))),
-        ),
-    [searched, activeCard, cf],
+      cardScoped.filter(
+        (r) =>
+          (!cf.name.length || cf.name.includes(r.name)) &&
+          (!cf.type.length || cf.type.includes(r.type)) &&
+          (!cf.category.length || cf.category.includes(r.category)) &&
+          (!cf.code.length || cf.code.includes(r.code)) &&
+          (!cf.inQty.length || cf.inQty.includes(String(formatNum(r.inQty)))) &&
+          (!cf.outQty.length ||
+            cf.outQty.includes(String(formatNum(r.outQty)))) &&
+          (!cf.stock.length || cf.stock.includes(String(formatNum(r.stock)))) &&
+          (!cf.minStock.length ||
+            cf.minStock.includes(String(formatNum(r.minStock)))) &&
+          (!cf.uom.length || cf.uom.includes(r.uom)) &&
+          (!cf.avgPrice.length ||
+            cf.avgPrice.includes(String(formatINR(r.avgPrice)))) &&
+          (!cf.totalVal.length ||
+            cf.totalVal.includes(String(formatINR(r.totalVal)))),
+      ),
+    [cardScoped, cf],
   );
 
   const sortedRows = useMemo(
@@ -1214,7 +1237,7 @@ export default function StockOverview() {
                   >
                     Material name{" "}
                     <ColFilter
-                      values={searched.map((r) => r.name)}
+                      values={colOpts.name}
                       selected={cf.name}
                       onChange={(v) => setCf((f) => ({ ...f, name: v }))}
                       column="name"
@@ -1234,7 +1257,7 @@ export default function StockOverview() {
                   >
                     Type{" "}
                     <ColFilter
-                      values={searched.map((r) => r.type)}
+                      values={colOpts.type}
                       selected={cf.type}
                       onChange={(v) => setCf((f) => ({ ...f, type: v }))}
                       column="type"
@@ -1254,7 +1277,7 @@ export default function StockOverview() {
                   >
                     Category{" "}
                     <ColFilter
-                      values={searched.map((r) => r.category)}
+                      values={colOpts.category}
                       selected={cf.category}
                       onChange={(v) => setCf((f) => ({ ...f, category: v }))}
                       column="category"
@@ -1274,7 +1297,7 @@ export default function StockOverview() {
                   >
                     Code{" "}
                     <ColFilter
-                      values={searched.map((r) => r.code)}
+                      values={colOpts.code}
                       selected={cf.code}
                       onChange={(v) => setCf((f) => ({ ...f, code: v }))}
                       column="code"
@@ -1294,7 +1317,7 @@ export default function StockOverview() {
                   >
                     IN{" "}
                     <ColFilter
-                      values={searched.map((r) => formatNum(r.inQty))}
+                      values={colOpts.inQty}
                       selected={cf.inQty}
                       onChange={(v) => setCf((f) => ({ ...f, inQty: v }))}
                       column="inQty"
@@ -1314,7 +1337,7 @@ export default function StockOverview() {
                   >
                     Out{" "}
                     <ColFilter
-                      values={searched.map((r) => formatNum(r.outQty))}
+                      values={colOpts.outQty}
                       selected={cf.outQty}
                       onChange={(v) => setCf((f) => ({ ...f, outQty: v }))}
                       column="outQty"
@@ -1334,7 +1357,7 @@ export default function StockOverview() {
                   >
                     Bal.{" "}
                     <ColFilter
-                      values={searched.map((r) => formatNum(r.stock))}
+                      values={colOpts.stock}
                       selected={cf.stock}
                       onChange={(v) => setCf((f) => ({ ...f, stock: v }))}
                       column="stock"
@@ -1354,7 +1377,7 @@ export default function StockOverview() {
                   >
                     Min stock{" "}
                     <ColFilter
-                      values={searched.map((r) => formatNum(r.minStock))}
+                      values={colOpts.minStock}
                       selected={cf.minStock}
                       onChange={(v) => setCf((f) => ({ ...f, minStock: v }))}
                       column="minStock"
@@ -1374,7 +1397,7 @@ export default function StockOverview() {
                   >
                     UOM{" "}
                     <ColFilter
-                      values={searched.map((r) => r.uom)}
+                      values={colOpts.uom}
                       selected={cf.uom}
                       onChange={(v) => setCf((f) => ({ ...f, uom: v }))}
                       column="uom"
@@ -1396,7 +1419,7 @@ export default function StockOverview() {
                       >
                         Avg price{" "}
                         <ColFilter
-                          values={searched.map((r) => formatINR(r.avgPrice))}
+                          values={colOpts.avgPrice}
                           selected={cf.avgPrice}
                           onChange={(v) =>
                             setCf((f) => ({ ...f, avgPrice: v }))
@@ -1418,7 +1441,7 @@ export default function StockOverview() {
                       >
                         Stock value{" "}
                         <ColFilter
-                          values={searched.map((r) => formatINR(r.totalVal))}
+                          values={colOpts.totalVal}
                           selected={cf.totalVal}
                           onChange={(v) =>
                             setCf((f) => ({ ...f, totalVal: v }))
