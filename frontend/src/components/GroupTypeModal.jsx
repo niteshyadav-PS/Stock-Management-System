@@ -1,14 +1,16 @@
 import React, { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { assignItemGroup } from "../api/api";
+import { assignSubCategory } from "../api/api";
 import {
   MATERIAL_TYPES,
   categoriesForType,
-  formatItemGroup,
+  formatSubCategory,
+  getItemGroup,
+  getSubCategory,
 } from "../constants/materialTypeGroups";
 
 /**
- * Assign display-only Item Group (Type · Category).
+ * Assign display-only Sub Category (Type · Category).
  * Does NOT change material type/category or stock history.
  */
 export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
@@ -62,9 +64,8 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
           String(m.category || "")
             .toLowerCase()
             .includes(q) ||
-          String(m.itemGroup || "")
-            .toLowerCase()
-            .includes(q)
+          getSubCategory(m).toLowerCase().includes(q) ||
+          getItemGroup(m).toLowerCase().includes(q)
         );
       })
       .slice()
@@ -78,7 +79,7 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
     [newType],
   );
 
-  const previewGroup = formatItemGroup(newType, newCategory);
+  const previewGroup = formatSubCategory(newType, newCategory);
   const hasSelection = selected.size > 0;
 
   function onNewTypeChange(nextType) {
@@ -132,26 +133,26 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
     setErr("");
   }
 
-  async function apply(itemGroup) {
+  async function apply(subCategory) {
     setErr("");
     setNotice("");
     if (!selected.size) {
-      setErr("Select items first, then choose Item Group.");
+      setErr("Select items first, then choose Sub Category.");
       return;
     }
     setSaving(true);
     try {
-      const res = await assignItemGroup([...selected], itemGroup);
-      const label = itemGroup || "(cleared)";
+      const res = await assignSubCategory([...selected], subCategory);
+      const label = subCategory || "(cleared)";
       setNotice(
-        `Item Group set on ${res?.materialsUpdated || selected.size} item(s) → ${label}. Type and Category were not changed.`,
+        `Sub Category set on ${res?.materialsUpdated || selected.size} item(s) → ${label}. Type and Category were not changed.`,
       );
       setSelected(new Set());
       setNewType("");
       setNewCategory("");
       onSaved?.();
     } catch (e) {
-      setErr(e.message || "Could not set Item Group.");
+      setErr(e.message || "Could not set Sub Category.");
     } finally {
       setSaving(false);
     }
@@ -167,10 +168,10 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
       >
         <div style={head}>
           <div>
-            <h3 style={{ margin: 0 }}>Set Item Group</h3>
+            <h3 style={{ margin: 0 }}>Set Sub Category</h3>
             <p style={hint}>
-              Select items, then assign an Item Group from your Type / Category
-              chart. This only fills the <strong>Item Group</strong> column —
+              Select items, then assign a Sub Category from your Type / Category
+              chart. This only fills the <strong>Sub Category</strong> column —
               it does <strong>not</strong> change real Type or Category.
             </p>
           </div>
@@ -189,7 +190,7 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Name, code, type, category, item group…"
+              placeholder="Name, code, type, category, sub category…"
               style={inputStyle}
             />
           </label>
@@ -257,9 +258,8 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
           <div style={listHead}>
             <span style={{ width: 28 }} />
             <span style={{ flex: 1.5 }}>Material</span>
-            <span style={{ flex: 0.9 }}>Type</span>
-            <span style={{ flex: 0.9 }}>Category</span>
-            <span style={{ flex: 1.2 }}>Item Group</span>
+            <span style={{ flex: 1 }}>Item Group</span>
+            <span style={{ flex: 1.2 }}>Sub Category</span>
           </div>
           {!filtered.length && (
             <p style={{ ...hint, padding: "12px" }}>No materials match.</p>
@@ -283,9 +283,8 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
                   onChange={() => toggle(id)}
                 />
                 <span style={{ flex: 1.5, fontWeight: 600 }}>{m.name}</span>
-                <span style={meta}>{m.type || "—"}</span>
-                <span style={meta}>{m.category || "—"}</span>
-                <span style={meta}>{m.itemGroup || "—"}</span>
+                <span style={meta}>{getItemGroup(m) || "—"}</span>
+                <span style={meta}>{getSubCategory(m) || "—"}</span>
               </label>
             );
           })}
@@ -301,13 +300,13 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 700 }}>
-            Assign Item Group to {selected.size || 0} selected item
+            Assign Sub Category to {selected.size || 0} selected item
             {selected.size === 1 ? "" : "s"}
           </div>
           {!hasSelection ? (
             <p style={{ ...hint, margin: 0 }}>
-              Select items above first. Then pick Type + Category for the Item
-              Group column.
+              Select items above first. Then pick Type + Category for the Sub
+              Category column.
             </p>
           ) : (
             <div
@@ -360,7 +359,7 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
               >
                 {saving
                   ? "Saving…"
-                  : `Set group (${selected.size})`}
+                  : `Set sub category (${selected.size})`}
               </button>
               <button
                 type="button"
@@ -368,15 +367,15 @@ export default function GroupTypeModal({ materials = [], onClose, onSaved }) {
                 disabled={saving}
                 onClick={() => apply("")}
                 style={{ height: 38 }}
-                title="Remove Item Group from selected items"
+                title="Remove Sub Category from selected items"
               >
-                Clear group
+                Clear sub category
               </button>
             </div>
           )}
           {hasSelection && previewGroup && (
             <span style={{ fontSize: 12, color: "var(--text-3)" }}>
-              Will set Item Group to: <strong>{previewGroup}</strong>
+              Will set Sub Category to: <strong>{previewGroup}</strong>
             </span>
           )}
         </div>

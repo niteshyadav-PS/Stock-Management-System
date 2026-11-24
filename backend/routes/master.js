@@ -151,22 +151,28 @@ router.post('/bulk', authMiddleware, requireRole('admin','purchase'), async (req
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/master/assign-item-group
-// Sets display-only itemGroup. Never changes type/category or inward/outward.
-router.post('/assign-item-group', authMiddleware, requireRole('admin','purchase'), async (req, res) => {
+// POST /api/master/assign-sub-category
+// Sets display-only itemGroup (type only) + subCategory. Never changes type/category.
+router.post('/assign-sub-category', authMiddleware, requireRole('admin','purchase'), async (req, res) => {
   try {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
-    const itemGroup = String(req.body?.itemGroup ?? '').trim();
+    const subCategory = String(req.body?.subCategory ?? '').trim();
     if (!ids.length) return res.status(400).json({ error: 'Select at least one material.' });
+
+    // "RAW MATERIALS · Box Pipe" → itemGroup = "RAW MATERIALS"
+    const itemGroup = subCategory.includes('·')
+      ? subCategory.split('·')[0].trim()
+      : String(req.body?.itemGroup || '').trim();
 
     const result = await Material.updateMany(
       { _id: { $in: ids } },
-      { $set: { itemGroup } },
+      { $set: { subCategory, itemGroup } },
     );
 
     res.json({
       materialsUpdated: result.modifiedCount || 0,
       matched: result.matchedCount || 0,
+      subCategory,
       itemGroup,
     });
   } catch (err) {

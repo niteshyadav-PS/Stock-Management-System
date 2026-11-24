@@ -1,4 +1,4 @@
-/** Fixed Type → Category options for display-only Item Group on Live Stock. */
+/** Fixed Type → Category options for display-only Sub Category on Live Stock. */
 export const MATERIAL_TYPE_CATEGORY_MAP = {
   "RAW MATERIALS": [
     "Box Pipe",
@@ -38,10 +38,28 @@ export function categoriesForType(type) {
   return MATERIAL_TYPE_CATEGORY_MAP[type] || [];
 }
 
-/** Stored/display value for the Item Group column. */
-export function formatItemGroup(type, category) {
+/** Stored/display value for the Sub Category column. */
+export function formatSubCategory(type, category) {
   const t = String(type || "").trim();
   const c = String(category || "").trim();
   if (!t || !c) return "";
   return `${t} · ${c}`;
+}
+
+/** Read sub category (Type · Category). */
+export function getSubCategory(row) {
+  return String(row?.subCategory || "").trim();
+}
+
+/**
+ * Item Group = chart type only (e.g. RAW MATERIALS).
+ * Prefer stored itemGroup; otherwise parse from subCategory.
+ */
+export function getItemGroup(row) {
+  const stored = String(row?.itemGroup || "").trim();
+  if (stored && !stored.includes("·")) return stored;
+  const sub = getSubCategory(row) || stored;
+  if (!sub) return "";
+  if (sub.includes("·")) return sub.split("·")[0].trim();
+  return sub;
 }

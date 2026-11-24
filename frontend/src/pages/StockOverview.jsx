@@ -10,6 +10,7 @@ import useClientPagination from "../hooks/useClientPagination";
 import ColFilter from "../components/ColFilter";
 import { sortByColumn } from "../components/NumSort";
 import GroupTypeModal from "../components/GroupTypeModal";
+import { getItemGroup, getSubCategory } from "../constants/materialTypeGroups";
 import { stockRowsFromSummary } from "../utils/stockMaps";
 import { buildCascadingColOpts } from "../utils/cascadingFilters";
 import {
@@ -126,7 +127,7 @@ export default function StockOverview() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const canSeePrice = user?.role === "admin" || user?.role === "purchase" || user?.role === "accounts";
-  const canSetItemGroup = user?.role === "admin" || user?.role === "purchase";
+  const canSetSubCategory = user?.role === "admin" || user?.role === "purchase";
 
   const [master, setMaster] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -134,13 +135,12 @@ export default function StockOverview() {
   const [search, setSearch] = useState("");
   const [activeCard, setActiveCard] = useState(null);
   const [activeChart, setActiveChart] = useState("top-balance"); // which chart to show
-  const [itemGroupOpen, setItemGroupOpen] = useState(false);
+  const [subCategoryOpen, setSubCategoryOpen] = useState(false);
 
   const [cf, setCf] = useState({
     name: [],
-    type: [],
-    category: [],
     itemGroup: [],
+    subCategory: [],
     code: [],
     inQty: [],
     outQty: [],
@@ -286,9 +286,8 @@ export default function StockOverview() {
     () =>
       buildCascadingColOpts(cardScoped, cf, {
         name: (r) => r.name,
-        type: (r) => r.type,
-        category: (r) => r.category,
-        itemGroup: (r) => r.itemGroup || "",
+        itemGroup: (r) => getItemGroup(r),
+        subCategory: (r) => getSubCategory(r),
         code: (r) => r.code,
         inQty: (r) => String(formatNum(r.inQty)),
         outQty: (r) => String(formatNum(r.outQty)),
@@ -306,10 +305,9 @@ export default function StockOverview() {
       cardScoped.filter(
         (r) =>
           (!cf.name.length || cf.name.includes(r.name)) &&
-          (!cf.type.length || cf.type.includes(r.type)) &&
-          (!cf.category.length || cf.category.includes(r.category)) &&
-          (!cf.itemGroup.length ||
-            cf.itemGroup.includes(r.itemGroup || "")) &&
+          (!cf.itemGroup.length || cf.itemGroup.includes(getItemGroup(r))) &&
+          (!cf.subCategory.length ||
+            cf.subCategory.includes(getSubCategory(r))) &&
           (!cf.code.length || cf.code.includes(r.code)) &&
           (!cf.inQty.length || cf.inQty.includes(String(formatNum(r.inQty)))) &&
           (!cf.outQty.length ||
@@ -349,9 +347,8 @@ export default function StockOverview() {
     const exportRows = sortedRows.map((r) => {
       const base = {
         "Material Name": r.name || "",
-        Type: r.type || "",
-        Category: r.category || "",
-        "Item Group": r.itemGroup || "",
+        "Item Group": getItemGroup(r),
+        "Sub Category": getSubCategory(r),
         Code: r.code || "",
         Inward: Number(r.inQty.toFixed(2)),
         Outward: Number(r.outQty.toFixed(2)),
@@ -575,13 +572,13 @@ export default function StockOverview() {
 <p>Monitor current stock availability with real-time balances calculated from inward and outward transactions.</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {canSetItemGroup && (
+          {canSetSubCategory && (
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              onClick={() => setItemGroupOpen(true)}
+              onClick={() => setSubCategoryOpen(true)}
             >
-              Set Item Group
+              Set Sub Category
             </button>
           )}
           <button
@@ -600,10 +597,10 @@ export default function StockOverview() {
         </div>
       </div>
 
-      {itemGroupOpen && (
+      {subCategoryOpen && (
         <GroupTypeModal
           materials={master}
-          onClose={() => setItemGroupOpen(false)}
+          onClose={() => setSubCategoryOpen(false)}
           onSaved={load}
         />
       )}
@@ -1282,52 +1279,32 @@ export default function StockOverview() {
                       gap: 4,
                     }}
                   >
-                    Type{" "}
-                    <ColFilter
-                      values={colOpts.type}
-                      selected={cf.type}
-                      onChange={(v) => setCf((f) => ({ ...f, type: v }))}
-                      column="type"
-                      sortKind="text"
-                      sort={numSort}
-                      onSort={changeNumSort}
-                    />
-                  </span>
-                </th>
-                <th>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
-                    Category{" "}
-                    <ColFilter
-                      values={colOpts.category}
-                      selected={cf.category}
-                      onChange={(v) => setCf((f) => ({ ...f, category: v }))}
-                      column="category"
-                      sortKind="text"
-                      sort={numSort}
-                      onSort={changeNumSort}
-                    />
-                  </span>
-                </th>
-                <th>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
                     Item Group{" "}
                     <ColFilter
                       values={colOpts.itemGroup}
                       selected={cf.itemGroup}
                       onChange={(v) => setCf((f) => ({ ...f, itemGroup: v }))}
                       column="itemGroup"
+                      sortKind="text"
+                      sort={numSort}
+                      onSort={changeNumSort}
+                    />
+                  </span>
+                </th>
+                <th>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    Sub Category{" "}
+                    <ColFilter
+                      values={colOpts.subCategory}
+                      selected={cf.subCategory}
+                      onChange={(v) => setCf((f) => ({ ...f, subCategory: v }))}
+                      column="subCategory"
                       sortKind="text"
                       sort={numSort}
                       onSort={changeNumSort}
@@ -1526,9 +1503,8 @@ export default function StockOverview() {
                       )}
                     </td>
                     <td style={{ fontWeight: 500 }}>{r.name}</td>
-                    <td>{r.type}</td>
-                    <td>{r.category}</td>
-                    <td>{r.itemGroup || "—"}</td>
+                    <td>{getItemGroup(r) || "—"}</td>
+                    <td>{getSubCategory(r) || "—"}</td>
                     <td className="mono">{r.code}</td>
                     <td className="num">{formatNum(r.inQty)}</td>
                     <td className="num">{formatNum(r.outQty)}</td>
