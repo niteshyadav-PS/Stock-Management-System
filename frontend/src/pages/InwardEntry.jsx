@@ -18,6 +18,7 @@ import { useAuth } from "../context/AuthContext";
 import {
   formatNum,
   todayStr,
+  daysAgoStr,
   readSheetFile,
   pickCol,
   parseExcelDate,
@@ -31,6 +32,25 @@ import { ThFilter } from "../components/ColFilter";
 import RenameFieldNames from "../components/RenameFieldNames";
 import { sortNewestFirst } from "../utils/stockMaps";
 import { buildCascadingColOpts } from "../utils/cascadingFilters";
+
+const EMPTY_COL_OPTS = {
+  date: [],
+  invdate: [],
+  challan: [],
+  po: [],
+  vendor: [],
+  name: [],
+  type: [],
+  code: [],
+  category: [],
+  uom: [],
+  qty: [],
+  gin: [],
+  by: [],
+  location: [],
+  remarks: [],
+  price: [],
+};
 
 const EMPTY_CF = {
   date: [],
@@ -851,12 +871,22 @@ export default function InwardEntry() {
   const [prBanner, setPrBanner] = useState(null); // { prNumber, poNumbers }
 
   // ── Entries table filters ─────────────────────────────────────────────
+  // Default last 90 days so the API only returns a small window (Clear = all dates).
   const [searchText, setSearchText] = useState("");
-  const [fromDate, setFromDate] = useState("");
+  const [fromDate, setFromDate] = useState(() => daysAgoStr(90));
   const [toDate, setToDate] = useState("");
   const [cf, setCf] = useState(EMPTY_CF);
   const [listNote, setListNote] = useState("");
+  const [listComplete, setListComplete] = useState(false);
   const loadGen = useRef(0);
+  const fromDateRef = useRef(fromDate);
+  const toDateRef = useRef(toDate);
+  useEffect(() => {
+    fromDateRef.current = fromDate;
+  }, [fromDate]);
+  useEffect(() => {
+    toDateRef.current = toDate;
+  }, [toDate]);
 
   // ── Staged upload (waits for confirmation) ────────────────────────────
   const [pending, setPending] = useState(null);
@@ -872,42 +902,73 @@ export default function InwardEntry() {
   // const [dupTo, setDupTo] = useState("");
 
   const loadEntries = useCallback(async (gen) => {
-    setListNote("Loading entries…");
+    const from = fromDateRef.current;
+    const to = toDateRef.current;
+    setListComplete(false);
+    setListNote(
+      from || to
+        ? "Loading entries…"
+        : "Loading all entries… this may take a moment",
+    );
     try {
-      await loadInPages((params) => getInward(params), {
-        isCancelled: () => gen !== loadGen.current,
-        onUpdate: (rows, info) => {
-          if (gen !== loadGen.current) return;
-          setEntries(rows);
-          setListNote(
-            info.complete ? "" : `Loading entries… ${rows.length} of ${info.total}`,
-          );
+      await loadInPages(
+        (params) =>
+          getInward({
+            ...params,
+            ...(from ? { from } : {}),
+            ...(to ? { to } : {}),
+          }),
+        {
+          isCancelled: () => gen !== loadGen.current,
+          onUpdate: (rows, info) => {
+            if (gen !== loadGen.current) return;
+            setEntries(rows);
+            setListComplete(!!info.complete);
+            setListNote(
+              info.complete
+                ? ""
+                : `Loading entries… ${rows.length} of ${info.total}`,
+            );
+          },
         },
-      });
+      );
     } catch (e) {
-      if (gen === loadGen.current) setListNote(e.message || "Could not load entries");
+      if (gen === loadGen.current) {
+        setListComplete(true);
+        setListNote(e.message || "Could not load entries");
+      }
     }
   }, []);
 
-  const load = useCallback(async () => {
+  // Master + pending POs once (form usable immediately).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [m, pos] = await Promise.all([
+          getMaster(),
+          getPendingInwardPOs().catch((e) => {
+            if (alive) setMsg({ text: e.message, ok: false });
+            return [];
+          }),
+        ]);
+        if (!alive) return;
+        setMaster(unwrapList(m).filter((x) => x.active !== false));
+        setPoList(Array.isArray(pos) ? pos : []);
+      } catch (e) {
+        if (alive) setMsg({ text: e.message, ok: false });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Entries reload when date range changes (server-side from/to).
+  useEffect(() => {
     const gen = ++loadGen.current;
-    const entriesPromise = loadEntries(gen);
-    try {
-      const [m, pos] = await Promise.all([
-        getMaster(),
-        getPendingInwardPOs().catch((e) => {
-          if (gen === loadGen.current) setMsg({ text: e.message, ok: false });
-          return [];
-        }),
-      ]);
-      if (gen !== loadGen.current) return;
-      setMaster(unwrapList(m).filter((x) => x.active !== false));
-      setPoList(Array.isArray(pos) ? pos : []);
-      await entriesPromise;
-    } catch (e) {
-      if (gen === loadGen.current) setMsg({ text: e.message, ok: false });
-    }
-  }, [loadEntries]);
+    loadEntries(gen);
+  }, [fromDate, toDate, loadEntries]);
 
   // After create/edit/delete only inward (+ pending POs) change — skip master re-fetch.
   const reloadInward = useCallback(async () => {
@@ -921,10 +982,6 @@ export default function InwardEntry() {
       if (gen === loadGen.current) setMsg({ text: e.message, ok: false });
     }
   }, [loadEntries]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   // Consume the PR hand-off once the PO dropdown data is available.
   useEffect(() => {
@@ -989,28 +1046,27 @@ export default function InwardEntry() {
     [searched, cf],
   );
 
-  const colOpts = useMemo(
-    () =>
-      buildCascadingColOpts(searched, cf, {
-        date: (e) => formatDateDMY(e.date),
-        invdate: (e) => (e.invdate ? formatDateDMY(e.invdate) : "—"),
-        challan: (e) => e.challan || "—",
-        po: (e) => e.po || "—",
-        vendor: (e) => e.vendor || "—",
-        name: (e) => e.name,
-        type: (e) => e.type,
-        code: (e) => e.code,
-        category: (e) => e.category,
-        uom: (e) => e.uom,
-        qty: (e) => String(formatNum(e.qty)),
-        gin: (e) => e.gin || "—",
-        by: (e) => e.by || "—",
-        location: (e) => e.location || "—",
-        remarks: (e) => e.remarks || "—",
-        price: (e) => String(formatNum(e.price)),
-      }),
-    [searched, cf],
-  );
+  const colOpts = useMemo(() => {
+    if (!listComplete) return EMPTY_COL_OPTS;
+    return buildCascadingColOpts(searched, cf, {
+      date: (e) => formatDateDMY(e.date),
+      invdate: (e) => (e.invdate ? formatDateDMY(e.invdate) : "—"),
+      challan: (e) => e.challan || "—",
+      po: (e) => e.po || "—",
+      vendor: (e) => e.vendor || "—",
+      name: (e) => e.name,
+      type: (e) => e.type,
+      code: (e) => e.code,
+      category: (e) => e.category,
+      uom: (e) => e.uom,
+      qty: (e) => String(formatNum(e.qty)),
+      gin: (e) => e.gin || "—",
+      by: (e) => e.by || "—",
+      location: (e) => e.location || "—",
+      remarks: (e) => e.remarks || "—",
+      price: (e) => String(formatNum(e.price)),
+    });
+  }, [searched, cf, listComplete]);
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredEntries, 25);
@@ -2882,8 +2938,14 @@ export default function InwardEntry() {
         </div>
 
         <h3>
-          All inward entries{" "}
+          Inward entries{" "}
           <span className="pill-count">{filteredEntries.length || 0}</span>
+          {fromDate || toDate ? (
+            <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
+              {fromDate ? formatDateDMY(fromDate) : "…"} → {toDate ? formatDateDMY(toDate) : "today"}
+              {" · Clear dates for full history"}
+            </span>
+          ) : null}
           {listNote && (
             <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
               {listNote}

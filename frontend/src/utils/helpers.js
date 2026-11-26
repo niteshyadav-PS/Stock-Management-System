@@ -27,6 +27,16 @@ export function todayStr() {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+/** YYYY-MM-DD for N calendar days before today (local). */
+export function daysAgoStr(days) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - (Number(days) || 0));
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 // Display a stored date as dd/mm/yyyy.
 // Regex-based (no `new Date()`) so "2026-08-03" can never be misread as
 // month/day by locale quirks. Handles ISO datetimes ("2026-08-03T...") too.

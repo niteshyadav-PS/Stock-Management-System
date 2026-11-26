@@ -232,6 +232,33 @@ const categoryOptions = useMemo(
     }
   }
 
+  function exportAllItems() {
+    if (!list.length) return;
+    const headers = [
+      "Material Name",
+      "Material Type",
+      "Materials Code",
+      "Category",
+      "UOM",
+      "Minimum Stock",
+      "Status",
+    ];
+    const rows = list
+      .slice()
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+      .map((m) => [
+        m.name || "",
+        m.type || "",
+        m.code || "",
+        m.category || "",
+        m.uom || "",
+        numMinStock(m.minStock),
+        isMaterialActive(m) ? "Active" : "Inactive",
+      ]);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportXlsx(headers, rows, "Item Master", `item-master-${dateStr}.xlsx`);
+  }
+
   async function handleFileUpload(e) {
     if (isViewerOnly) {
       setUploadMsg({ text: "Viewer accounts can only view master data.", ok: false });
@@ -493,17 +520,37 @@ const categoryOptions = useMemo(
 
       {/* Table */}
       <div className="card card-wide">
-        <h3>
-          Materials <span className="pill-count">{list.length || 0}</span>
-          {msg.text && (
-            <span
-              className={`msg ${msg.ok ? "ok" : "err"}`}
-              style={{ marginLeft: 12, fontSize: 13, fontWeight: 400 }}
-            >
-              {msg.text}
-            </span>
-          )}
-        </h3>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 4,
+          }}
+        >
+          <h3 style={{ margin: 0 }}>
+            Materials <span className="pill-count">{list.length || 0}</span>
+            {msg.text && (
+              <span
+                className={`msg ${msg.ok ? "ok" : "err"}`}
+                style={{ marginLeft: 12, fontSize: 13, fontWeight: 400 }}
+              >
+                {msg.text}
+              </span>
+            )}
+          </h3>
+          <button
+            type="button"
+            className="btn btn-in btn-sm"
+            onClick={exportAllItems}
+            disabled={!list.length}
+            title="Download all materials as Excel"
+          >
+            Download Excel
+          </button>
+        </div>
         <div
           className="searchbar"
           style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}

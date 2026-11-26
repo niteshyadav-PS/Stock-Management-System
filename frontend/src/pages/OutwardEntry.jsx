@@ -14,6 +14,7 @@ import { useAuth } from "../context/AuthContext";
 import {
   formatNum,
   todayStr,
+  daysAgoStr,
   readSheetFile,
   pickCol,
   parseExcelDate,
@@ -32,6 +33,25 @@ import {
 import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 const EMPTY_CF = {
+  date: [],
+  project: [],
+  custpo: [],
+  slip: [],
+  dept: [],
+  recby: [],
+  by: [],
+  name: [],
+  type: [],
+  code: [],
+  category: [],
+  reqty: [],
+  qty: [],
+  uom: [],
+  remqty: [],
+  remarks: [],
+};
+
+const EMPTY_COL_OPTS = {
   date: [],
   project: [],
   custpo: [],
@@ -550,6 +570,7 @@ export default function OutwardEntry() {
   const [entries, setEntries] = useState([]);
   const [stockMaps, setStockMaps] = useState({ inMap: new Map(), outMap: new Map() });
   const [listNote, setListNote] = useState("");
+  const [listComplete, setListComplete] = useState(false);
   const loadGen = useRef(0);
   const [header, setHeader] = useState(EMPTY_HEADER);
   const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
@@ -558,27 +579,57 @@ export default function OutwardEntry() {
   const [loading, setLoading] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
   const [searchText, setSearchText] = useState("");
-  const [fromDate, setFromDate] = useState("");
+  const [fromDate, setFromDate] = useState(() => daysAgoStr(90));
   const [toDate, setToDate] = useState("");
   const [cf, setCf] = useState(EMPTY_CF);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const fromDateRef = useRef(fromDate);
+  const toDateRef = useRef(toDate);
+  useEffect(() => {
+    fromDateRef.current = fromDate;
+  }, [fromDate]);
+  useEffect(() => {
+    toDateRef.current = toDate;
+  }, [toDate]);
 
   const loadEntries = useCallback(async (gen) => {
-    setListNote("Loading entries…");
+    const from = fromDateRef.current;
+    const to = toDateRef.current;
+    setListComplete(false);
+    setListNote(
+      from || to
+        ? "Loading entries…"
+        : "Loading all entries… this may take a moment",
+    );
     try {
-      await loadInPages((params) => getOutward(params), {
-        isCancelled: () => gen !== loadGen.current,
-        onUpdate: (rows, info) => {
-          if (gen !== loadGen.current) return;
-          setEntries(rows.map(normalizeOutwardEntry));
-          setListNote(
-            info.complete ? "" : `Loading entries… ${rows.length} of ${info.total}`,
-          );
+      await loadInPages(
+        (params) =>
+          getOutward({
+            ...params,
+            ...(from ? { from } : {}),
+            ...(to ? { to } : {}),
+          }),
+        {
+          isCancelled: () => gen !== loadGen.current,
+          mapPage: normalizeOutwardEntry,
+          onUpdate: (rows, info) => {
+            if (gen !== loadGen.current) return;
+            setEntries(rows);
+            setListComplete(!!info.complete);
+            setListNote(
+              info.complete
+                ? ""
+                : `Loading entries… ${rows.length} of ${info.total}`,
+            );
+          },
         },
-      });
+      );
     } catch (e) {
-      if (gen === loadGen.current) setListNote(e.message || "Could not load entries");
+      if (gen === loadGen.current) {
+        setListComplete(true);
+        setListNote(e.message || "Could not load entries");
+      }
     }
   }, []);
 
@@ -587,21 +638,31 @@ export default function OutwardEntry() {
     setStockMaps({ inMap: maps.inMap, outMap: maps.outMap });
   }, []);
 
-  const load = useCallback(async () => {
-    const gen = ++loadGen.current;
-    const entriesPromise = loadEntries(gen);
-    try {
-      const [m, summary] = await Promise.all([getMaster(), getStockSummary()]);
-      if (gen !== loadGen.current) return;
-      setMaster(unwrapList(m).filter((x) => x.active !== false));
-      applySummary(summary);
-      await entriesPromise;
-    } catch (e) {
-      if (gen === loadGen.current) {
-        setMsg({ text: e.message || "Could not load entries", ok: false });
+  // Master + stock summary once (form usable immediately).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [m, summary] = await Promise.all([getMaster(), getStockSummary()]);
+        if (!alive) return;
+        setMaster(unwrapList(m).filter((x) => x.active !== false));
+        applySummary(summary);
+      } catch (e) {
+        if (alive) {
+          setMsg({ text: e.message || "Could not load stock data", ok: false });
+        }
       }
-    }
-  }, [applySummary, loadEntries]);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [applySummary]);
+
+  // Entries reload when date range changes (server-side from/to).
+  useEffect(() => {
+    const gen = ++loadGen.current;
+    loadEntries(gen);
+  }, [fromDate, toDate, loadEntries]);
 
   // After create/edit/delete, refresh balances and the list. Skip the master list.
   const reloadOutward = useCallback(async () => {
@@ -617,10 +678,6 @@ export default function OutwardEntry() {
       }
     }
   }, [applySummary, loadEntries]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const searched = useMemo(
     () =>
@@ -665,37 +722,36 @@ export default function OutwardEntry() {
     [searched, cf],
   );
 
-  const colOpts = useMemo(
-    () =>
-      buildCascadingColOpts(searched, cf, {
-        date: (e) => formatDateDMY(e.date),
-        project: (e) => e.project || "—",
-        custpo: (e) => e.custpo || "—",
-        slip: (e) => e.slip || "—",
-        dept: (e) => e.dept || "—",
-        recby: (e) => e.recby || "—",
-        by: (e) => e.by || "—",
-        name: (e) => e.name,
-        type: (e) => e.type,
-        code: (e) => e.code,
-        category: (e) => e.category,
-        reqty: (e) =>
-          e.reqty !== undefined && e.reqty !== null && e.reqty !== ""
-            ? String(formatNum(e.reqty))
-            : "—",
-        qty: (e) => String(formatNum(e.qty)),
-        uom: (e) => e.uom,
-        remqty: (e) => {
-          const hasReqty =
-            e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
-          return hasReqty
-            ? String(formatNum(Number(e.reqty) - Number(e.qty)))
-            : "—";
-        },
-        remarks: (e) => e.remarks || "—",
-      }),
-    [searched, cf],
-  );
+  const colOpts = useMemo(() => {
+    if (!listComplete) return EMPTY_COL_OPTS;
+    return buildCascadingColOpts(searched, cf, {
+      date: (e) => formatDateDMY(e.date),
+      project: (e) => e.project || "—",
+      custpo: (e) => e.custpo || "—",
+      slip: (e) => e.slip || "—",
+      dept: (e) => e.dept || "—",
+      recby: (e) => e.recby || "—",
+      by: (e) => e.by || "—",
+      name: (e) => e.name,
+      type: (e) => e.type,
+      code: (e) => e.code,
+      category: (e) => e.category,
+      reqty: (e) =>
+        e.reqty !== undefined && e.reqty !== null && e.reqty !== ""
+          ? String(formatNum(e.reqty))
+          : "—",
+      qty: (e) => String(formatNum(e.qty)),
+      uom: (e) => e.uom,
+      remqty: (e) => {
+        const hasReqty =
+          e.reqty !== undefined && e.reqty !== null && e.reqty !== "";
+        return hasReqty
+          ? String(formatNum(Number(e.reqty) - Number(e.qty)))
+          : "—";
+      },
+      remarks: (e) => e.remarks || "—",
+    });
+  }, [searched, cf, listComplete]);
 
   const { pageItems, page, pageSize, total, setPage, setPageSize } =
     useClientPagination(filteredEntries, 25);
@@ -1647,8 +1703,14 @@ export default function OutwardEntry() {
           </p>
         )}
         <h3>
-          All outward entries{" "}
+          Outward entries{" "}
           <span className="pill-count">{filteredEntries.length || 0}</span>
+          {fromDate || toDate ? (
+            <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
+              {fromDate ? formatDateDMY(fromDate) : "…"} → {toDate ? formatDateDMY(toDate) : "today"}
+              {" · Clear dates for full history"}
+            </span>
+          ) : null}
           {listNote && (
             <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
               {listNote}

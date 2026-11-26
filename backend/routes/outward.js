@@ -2,6 +2,7 @@ const router  = require('express').Router();
 const Outward = require('../models/Outward');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { parsePagination, paginateQuery } = require('../utils/paginate');
+const { dateRangeFilter } = require('../utils/dateRange');
 
 const OUTWARD_EDIT_ROLES = ['admin', 'store', 'store_manager'];
 
@@ -25,10 +26,12 @@ function normalizeOutwardResponse(entry) {
 
 // GET /api/outward
 // Optional ?page=&limit= → { items, total, page, limit }; otherwise full array.
+// Optional ?from=&to= (YYYY-MM-DD) filters the entry `date` field.
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
-    const result = await paginateQuery(Outward, {}, {
+    const filter = dateRangeFilter(req.query, 'date');
+    const result = await paginateQuery(Outward, filter, {
       sort: { createdAt: -1 },
       pagination,
     });

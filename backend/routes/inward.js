@@ -5,6 +5,7 @@ const PurchaseOrder   = require('../models/PurchaseOrder');
 const PurchaseRequest = require('../models/PurchaseRequest');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { parsePagination, paginateQuery } = require('../utils/paginate');
+const { dateRangeFilter } = require('../utils/dateRange');
 
 // Allowed fields for create / full edit
 const INWARD_FIELDS = [
@@ -138,10 +139,13 @@ async function checkAndReceivePR(poNumbers, byName, byUsername) {
 
 // GET /api/inward
 // Optional ?page=&limit= → { items, total, page, limit }; otherwise full array.
+// Optional ?from=&to= (YYYY-MM-DD) filters the entry `date` field.
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
-    const filter = {};
+    const filter = {
+      ...dateRangeFilter(req.query, 'date'),
+    };
     if (String(req.query.unpriced || '') === '1') {
       filter.$or = [
         { price: { $exists: false } },
