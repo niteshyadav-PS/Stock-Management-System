@@ -14,7 +14,6 @@ import { useAuth } from "../context/AuthContext";
 import {
   formatNum,
   todayStr,
-  daysAgoStr,
   readSheetFile,
   pickCol,
   parseExcelDate,
@@ -579,8 +578,9 @@ export default function OutwardEntry() {
   const [loading, setLoading] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
   const [searchText, setSearchText] = useState("");
-  const [fromDate, setFromDate] = useState(() => daysAgoStr(90));
-  const [toDate, setToDate] = useState("");
+  // Default today so the API only returns today's window (Clear = all dates).
+  const [fromDate, setFromDate] = useState(() => todayStr());
+  const [toDate, setToDate] = useState(() => todayStr());
   const [cf, setCf] = useState(EMPTY_CF);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -1745,7 +1745,7 @@ export default function OutwardEntry() {
           <span className="pill-count">{filteredEntries.length || 0}</span>
           {fromDate || toDate ? (
             <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
-              {fromDate ? formatDateDMY(fromDate) : "…"} → {toDate ? formatDateDMY(toDate) : "today"}
+              {fromDate ? formatDateDMY(fromDate) : "…"} → {toDate ? formatDateDMY(toDate) : "…"}
               {" · Clear dates for full history"}
             </span>
           ) : null}

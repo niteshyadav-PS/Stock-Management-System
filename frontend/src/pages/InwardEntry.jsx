@@ -18,7 +18,6 @@ import { useAuth } from "../context/AuthContext";
 import {
   formatNum,
   todayStr,
-  daysAgoStr,
   readSheetFile,
   pickCol,
   parseExcelDate,
@@ -871,10 +870,10 @@ export default function InwardEntry() {
   const [prBanner, setPrBanner] = useState(null); // { prNumber, poNumbers }
 
   // ── Entries table filters ─────────────────────────────────────────────
-  // Default last 90 days so the API only returns a small window (Clear = all dates).
+  // Default today so the API only returns today's window (Clear = all dates).
   const [searchText, setSearchText] = useState("");
-  const [fromDate, setFromDate] = useState(() => daysAgoStr(90));
-  const [toDate, setToDate] = useState("");
+  const [fromDate, setFromDate] = useState(() => todayStr());
+  const [toDate, setToDate] = useState(() => todayStr());
   const [cf, setCf] = useState(EMPTY_CF);
   const [listNote, setListNote] = useState("");
   const [listComplete, setListComplete] = useState(false);
@@ -2980,7 +2979,7 @@ export default function InwardEntry() {
           <span className="pill-count">{filteredEntries.length || 0}</span>
           {fromDate || toDate ? (
             <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}>
-              {fromDate ? formatDateDMY(fromDate) : "…"} → {toDate ? formatDateDMY(toDate) : "today"}
+              {fromDate ? formatDateDMY(fromDate) : "…"} → {toDate ? formatDateDMY(toDate) : "…"}
               {" · Clear dates for full history"}
             </span>
           ) : null}
