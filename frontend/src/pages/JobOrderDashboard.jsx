@@ -513,7 +513,7 @@ export default function JobOrderDashboard() {
     setErr("");
     try {
       const params = jobType === "all" ? {} : { jobType };
-      const list = unwrapList(await getJobOrders(params));
+      const list = unwrapList(await getJobOrders({ ...params, full: 1 }));
       setOrders(list);
     } catch (e) {
       setErr(e.message || "Could not load job orders");

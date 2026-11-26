@@ -25,16 +25,18 @@ function parsePagination(query = {}, { defaultLimit = 25, maxLimit = 500 } = {})
  * Run a paginated Mongo find. When pagination is null, returns a plain array
  * (legacy callers). When set, returns { items, total, page, limit }.
  */
-async function paginateQuery(Model, filter, { sort, pagination, lean = true } = {}) {
+async function paginateQuery(Model, filter, { sort, pagination, lean = true, select } = {}) {
   if (!pagination) {
     let q = Model.find(filter || {});
     if (sort) q = q.sort(sort);
+    if (select) q = q.select(select);
     if (lean) q = q.lean();
     return q;
   }
 
   const { page, limit, skip } = pagination;
   let q = Model.find(filter || {}).sort(sort || {}).skip(skip).limit(limit);
+  if (select) q = q.select(select);
   if (lean) q = q.lean();
 
   const [items, total] = await Promise.all([

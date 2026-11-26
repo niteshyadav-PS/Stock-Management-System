@@ -185,6 +185,10 @@ function receivableNow(item) {
 // ── GET /api/job-orders ───────────────────────────────────────────────────────
 // Optional ?page=&limit= → { items, total, page, limit }; otherwise full array.
 // Vendor role only receives orders issued to their own company.
+// Default list omits history + item receipts (large nested arrays). Pass
+// ?full=1 for detail-heavy consumers (QC / dashboard / report).
+const JO_LIST_SELECT = "-history -items.receipts";
+
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pagination = parsePagination(req.query);
@@ -192,9 +196,14 @@ router.get("/", authMiddleware, async (req, res) => {
       await vendorFilter(req),
       jobTypeFilter(req.query.jobType),
     );
+    const wantFull =
+      req.query.full === "1" ||
+      req.query.full === "true" ||
+      req.query.full === "yes";
     const result = await paginateQuery(JobOrder, filter, {
       sort: { createdAt: -1 },
       pagination,
+      select: wantFull ? undefined : JO_LIST_SELECT,
     });
     res.json(result);
   } catch (err) {

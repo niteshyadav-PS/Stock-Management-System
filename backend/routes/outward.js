@@ -3,6 +3,7 @@ const Outward = require('../models/Outward');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { parsePagination, paginateQuery } = require('../utils/paginate');
 const { dateRangeFilter } = require('../utils/dateRange');
+const { invalidateStockSummaryCache } = require('../utils/stockSummaryCache');
 
 const OUTWARD_EDIT_ROLES = ['admin', 'store', 'store_manager'];
 
@@ -49,6 +50,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.post('/', authMiddleware, requireRole(...OUTWARD_EDIT_ROLES), async (req, res) => {
   try {
     const entry = await Outward.create(normalizeOutwardPayload(req.body));
+    invalidateStockSummaryCache();
     res.status(201).json(normalizeOutwardResponse(entry.toObject()));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -63,6 +65,7 @@ router.post('/bulk', authMiddleware, requireRole(...OUTWARD_EDIT_ROLES), async (
     const items = docs.map((d) =>
       normalizeOutwardResponse(d.toObject ? d.toObject() : d),
     );
+    invalidateStockSummaryCache();
     res.status(201).json({ inserted: items.length, items });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -76,6 +79,7 @@ router.put('/:id', authMiddleware, requireRole(...OUTWARD_EDIT_ROLES), async (re
       { new: true },
     );
     if (!doc) return res.status(404).json({ error: 'Not found.' });
+    invalidateStockSummaryCache();
     res.json(normalizeOutwardResponse(doc.toObject()));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -85,6 +89,7 @@ router.delete('/:id', authMiddleware, requireRole(...OUTWARD_EDIT_ROLES), async 
   try {
     const doc = await Outward.findByIdAndDelete(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Not found.' });
+    invalidateStockSummaryCache();
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

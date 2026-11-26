@@ -2,6 +2,10 @@ const router = require('express').Router();
 const Inward = require('../models/Inward');
 const Outward = require('../models/Outward');
 const { authMiddleware } = require('../middleware/auth');
+const {
+  getCachedStockSummary,
+  invalidateStockSummaryCache,
+} = require('../utils/stockSummaryCache');
 
 const nameKey = {
   $toLower: { $trim: { input: { $ifNull: ['$name', ''] } } },
@@ -123,9 +127,10 @@ async function buildStockSummary() {
 }
 
 // Totals grouped by material. A few hundred rows instead of every transaction.
+// Cached ~60s; cleared when inward/outward/price writes invalidate.
 router.get('/summary', authMiddleware, async (req, res) => {
   try {
-    res.json(await buildStockSummary());
+    res.json(await getCachedStockSummary(buildStockSummary));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -159,3 +164,4 @@ router.get('/received-by-po', authMiddleware, async (req, res) => {
 
 module.exports = router;
 module.exports.buildStockSummary = buildStockSummary;
+module.exports.invalidateStockSummaryCache = invalidateStockSummaryCache;

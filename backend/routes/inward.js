@@ -6,6 +6,7 @@ const PurchaseRequest = require('../models/PurchaseRequest');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { parsePagination, paginateQuery } = require('../utils/paginate');
 const { dateRangeFilter } = require('../utils/dateRange');
+const { invalidateStockSummaryCache } = require('../utils/stockSummaryCache');
 
 // Allowed fields for create / full edit
 const INWARD_FIELDS = [
@@ -257,6 +258,7 @@ router.post('/', authMiddleware, requireRole('admin','store','store_manager','pu
     if (!data.poId) data.poId = null;
 
     const entry = await Inward.create(data);
+    invalidateStockSummaryCache();
 
     // Check if PR should be auto-received
     if (data.po) {
@@ -287,6 +289,7 @@ router.post('/bulk', authMiddleware, requireRole('admin','store','store_manager'
 
     const docs = await Inward.insertMany(clean, { ordered: false });
     const items = docs.map((d) => (d.toObject ? d.toObject() : d));
+    invalidateStockSummaryCache();
 
     // Check PR auto-receive for all unique PO numbers in this batch
     const poNumbers = [...new Set(clean.map(d => d.po).filter(Boolean))];
@@ -307,6 +310,7 @@ router.patch('/:id', authMiddleware, requireRole('admin','purchase'), async (req
       req.params.id, { $set: { price } }, { new: true }
     );
     if (!doc) return res.status(404).json({ error: 'Not found.' });
+    invalidateStockSummaryCache();
     res.json(doc);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -325,6 +329,7 @@ router.put('/:id', authMiddleware, requireRole('admin','store_manager'), async (
       req.params.id, { $set: data }, { new: true }
     );
     if (!doc) return res.status(404).json({ error: 'Not found.' });
+    invalidateStockSummaryCache();
 
     // Re-check PR auto-receive in case qty was increased
     if (doc.po) {
@@ -340,6 +345,7 @@ router.delete('/:id', authMiddleware, requireRole('admin','store_manager'), asyn
   try {
     const doc = await Inward.findByIdAndDelete(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Not found.' });
+    invalidateStockSummaryCache();
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

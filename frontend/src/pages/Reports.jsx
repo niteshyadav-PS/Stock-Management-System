@@ -440,8 +440,8 @@ export default function Reports() {
 
   const [repType, setRepType] = useState("inward");
   const [numSort, setNumSort] = useState(null);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(() => todayStr());
+  const [dateTo, setDateTo] = useState(() => todayStr());
   const [category, setCategory] = useState("");
   const [vendor, setVendor] = useState("");
   const [material, setMaterial] = useState("");
@@ -482,22 +482,40 @@ export default function Reports() {
 
   const [listNote, setListNote] = useState("");
   const loadGen = useRef(0);
+  const dateFromRef = useRef(dateFrom);
+  const dateToRef = useRef(dateTo);
+  useEffect(() => {
+    dateFromRef.current = dateFrom;
+  }, [dateFrom]);
+  useEffect(() => {
+    dateToRef.current = dateTo;
+  }, [dateTo]);
 
   const load = useCallback(async () => {
     const gen = ++loadGen.current;
+    const from = dateFromRef.current;
+    const to = dateToRef.current;
+    const dateParams = {
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+    };
     try {
       const [m, s] = await Promise.all([getMaster(), getStockSummary()]);
       if (gen !== loadGen.current) return;
       setMaster(unwrapList(m));
       setSummary(s);
-      setListNote("Loading report data…");
+      setListNote(
+        from || to
+          ? "Loading report data…"
+          : "Loading all history… this may take a moment",
+      );
       let inDone = false;
       let outDone = false;
       const finish = () => {
         if (gen === loadGen.current && inDone && outDone) setListNote("");
       };
       await Promise.all([
-        loadInPages((params) => getInward(params), {
+        loadInPages((params) => getInward({ ...params, ...dateParams }), {
           isCancelled: () => gen !== loadGen.current,
           onUpdate: (rows, info) => {
             if (gen !== loadGen.current) return;
@@ -510,7 +528,7 @@ export default function Reports() {
             }
           },
         }),
-        loadInPages((params) => getOutward(params), {
+        loadInPages((params) => getOutward({ ...params, ...dateParams }), {
           isCancelled: () => gen !== loadGen.current,
           onUpdate: (rows, info) => {
             if (gen !== loadGen.current) return;
@@ -530,7 +548,7 @@ export default function Reports() {
   }, []);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, dateFrom, dateTo]);
 
   useEffect(() => {
     setNumSort(null);
@@ -1117,6 +1135,21 @@ export default function Reports() {
                 style={{ cursor: "pointer" }}
               />
             </div>
+            {(dateFrom || dateTo) && (
+              <div className="field" style={{ alignSelf: "end" }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                  title="Clear dates to load full history"
+                >
+                  Clear dates
+                </button>
+              </div>
+            )}
             {repType !== "outward" && (
               <div className="field">
                 <label>Vendor</label>

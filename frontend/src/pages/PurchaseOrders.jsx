@@ -6,7 +6,6 @@ import {
   getPurchaseRequests,
   getPurchaseOrdersByPR,
   createPurchaseOrder,
-  healPendingCreatePOs,
   getPurchaseOrders,
   getStockSummary,
   savePrItemPrices,
@@ -169,25 +168,9 @@ export default function PurchaseOrders() {
       const posList = unwrapList(pos);
       const map = stockMapFromSummary(masterList, summary);
 
-      // Show data immediately — never block the table on heal
       setStockMap(map);
       setPoList(posList);
       setRequests(requestList);
-
-      // Heal stuck PRs in the background; refresh lists only if something changed
-      healPendingCreatePOs()
-        .then(async (heal) => {
-          if (!(heal?.healed > 0 || heal?.itemsFixed > 0)) return;
-          const [reqs2, pos2] = await Promise.all([
-            getPurchaseRequests(),
-            getPurchaseOrders(),
-          ]);
-          setRequests(unwrapList(reqs2));
-          setPoList(unwrapList(pos2));
-        })
-        .catch(() => {
-          /* heal is best-effort */
-        });
     } catch (err) {
       console.error("Failed to load purchase orders page:", err);
       setMsg({

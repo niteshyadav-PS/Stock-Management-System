@@ -1,4 +1,9 @@
 import axios from "axios";
+import {
+  cachedFetch,
+  invalidateResourceCache,
+  CACHE_KEYS,
+} from "./resourceCache";
 
 // ── Base URL logic ────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL
@@ -94,17 +99,46 @@ function withQuery(path, params = {}) {
 }
 
 // ── Master list ───────────────────────────────────────────────────────────────
-export const getMaster = (params) => client.get(withQuery("/master", params || {}));
-export const addMaterial = (data) => client.post("/master", data);
-export const updateMaterial = (id, data) => client.put(`/master/${id}`, data);
+export const getMaster = (params) => {
+  const p = params || {};
+  const hasFilters = Object.keys(p).some(
+    (k) => p[k] !== undefined && p[k] !== null && p[k] !== "",
+  );
+  // Only cache the unfiltered full list used by most pages.
+  if (hasFilters) return client.get(withQuery("/master", p));
+  return cachedFetch(CACHE_KEYS.master, () => client.get("/master"), 120_000);
+};
+export const addMaterial = (data) =>
+  client.post("/master", data).then((r) => {
+    invalidateResourceCache(CACHE_KEYS.master);
+    return r;
+  });
+export const updateMaterial = (id, data) =>
+  client.put(`/master/${id}`, data).then((r) => {
+    invalidateResourceCache(CACHE_KEYS.master);
+    return r;
+  });
 export const setMaterialActive = (id, active) =>
-  client.patch(`/master/${id}/active`, { active });
+  client.patch(`/master/${id}/active`, { active }).then((r) => {
+    invalidateResourceCache(CACHE_KEYS.master);
+    return r;
+  });
 export const bulkMaster = (materials) =>
-  client.post("/master/bulk", { materials });
+  client.post("/master/bulk", { materials }).then((r) => {
+    invalidateResourceCache(CACHE_KEYS.master);
+    return r;
+  });
 /** Display-only Live Stock sub category — does not change type/category. */
 export const assignSubCategory = (ids, subCategory) =>
-  client.post("/master/assign-sub-category", { ids, subCategory });
-export const deleteMaterial = (id) => client.delete(`/master/${id}`);
+  client.post("/master/assign-sub-category", { ids, subCategory }).then((r) => {
+    invalidateResourceCache(CACHE_KEYS.master);
+    return r;
+  });
+export const deleteMaterial = (id) =>
+  client.delete(`/master/${id}`).then((r) => {
+    invalidateResourceCache(CACHE_KEYS.master);
+    return r;
+  });
 
 /** Past material names on inward+outward (for fixing renames done before sync). */
 export const getStockMaterialNameValues = () =>
@@ -119,17 +153,30 @@ export const getInwardNameValues = (field) =>
   client.get(withQuery("/inward/name-values", { field }));
 export const renameInwardNames = (field, from, to) =>
   client.post("/inward/rename-names", { field, from, to });
-export const addInward = (data) => client.post("/inward", data);
-export const bulkInward = (entries) => client.post("/inward/bulk", { entries });
+function bustStockSummary(result) {
+  invalidateResourceCache(CACHE_KEYS.stockSummary);
+  return result;
+}
+export const addInward = (data) =>
+  client.post("/inward", data).then(bustStockSummary);
+export const bulkInward = (entries) =>
+  client.post("/inward/bulk", { entries }).then(bustStockSummary);
 export const updatePrice = (id, price) =>
-  client.patch(`/inward/${id}`, { price });
-export const updateInward = (id, data) => client.put(`/inward/${id}`, data);
-export const deleteInward = (id) => client.delete(`/inward/${id}`);
+  client.patch(`/inward/${id}`, { price }).then(bustStockSummary);
+export const updateInward = (id, data) =>
+  client.put(`/inward/${id}`, data).then(bustStockSummary);
+export const deleteInward = (id) =>
+  client.delete(`/inward/${id}`).then(bustStockSummary);
 
 // ── Outward ───────────────────────────────────────────────────────────────────
 export const getOutward = (params) => client.get(withQuery("/outward", params || {}));
 
-export const getStockSummary = () => client.get("/stock/summary");
+export const getStockSummary = () =>
+  cachedFetch(
+    CACHE_KEYS.stockSummary,
+    () => client.get("/stock/summary"),
+    60_000,
+  );
 export const getReceivedByPo = () => client.get("/stock/received-by-po");
 
 // Public Live Stock embed (optional key if EMBED_STOCK_TOKEN is set on server)
@@ -138,11 +185,14 @@ export const getEmbedStockSummary = (key) =>
 export const getEmbedMaster = (key) =>
   client.get(withQuery("/embed/master", key ? { key } : {}));
 
-export const addOutward = (data) => client.post("/outward", data);
+export const addOutward = (data) =>
+  client.post("/outward", data).then(bustStockSummary);
 export const bulkOutward = (entries) =>
-  client.post("/outward/bulk", { entries });
-export const updateOutward = (id, data) => client.put(`/outward/${id}`, data);
-export const deleteOutward = (id) => client.delete(`/outward/${id}`);
+  client.post("/outward/bulk", { entries }).then(bustStockSummary);
+export const updateOutward = (id, data) =>
+  client.put(`/outward/${id}`, data).then(bustStockSummary);
+export const deleteOutward = (id) =>
+  client.delete(`/outward/${id}`).then(bustStockSummary);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 export const getUsers = (params) => client.get(withQuery("/users", params || {}));

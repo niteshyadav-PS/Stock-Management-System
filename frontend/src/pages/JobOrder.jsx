@@ -4861,7 +4861,15 @@ export default function JobOrder({ jobType = "powder_coating" }) {
       menuItems.push({
         key: "edit",
         label: "Edit",
-        onClick: () => setEditOrder(order),
+        onClick: async () => {
+          try {
+            const full = await apiGet(`/job-orders/${order._id}`);
+            setEditOrder(full);
+          } catch (err) {
+            console.error("[JobOrder] failed to load order for edit", err);
+            setEditOrder(order);
+          }
+        },
       });
     }
     if (hasPending && canReceive) {
@@ -4869,7 +4877,15 @@ export default function JobOrder({ jobType = "powder_coating" }) {
         key: "receive",
         label: order.status === "partial" ? "Receive" : "Received",
         primary: true,
-        onClick: () => setReceiveOrder(order),
+        onClick: async () => {
+          try {
+            const full = await apiGet(`/job-orders/${order._id}`);
+            setReceiveOrder(full);
+          } catch (err) {
+            console.error("[JobOrder] failed to load order for receive", err);
+            setReceiveOrder(order);
+          }
+        },
       });
     }
     menuItems.push({

@@ -47,7 +47,7 @@ export default function JobOrderReport() {
       } catch {
         /* category falls back to name matchers */
       }
-      const list = unwrapList(await getJobOrders({}));
+      const list = unwrapList(await getJobOrders({ full: 1 }));
       setOrders(list);
     } catch (e) {
       setErr(e.message || "Could not load job orders");

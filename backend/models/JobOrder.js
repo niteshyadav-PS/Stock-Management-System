@@ -109,6 +109,8 @@ const jobOrderSchema = new mongoose.Schema({
 jobOrderSchema.index({ srNo: 1 });
 jobOrderSchema.index({ createdAt: -1 });
 jobOrderSchema.index({ jobType: 1, createdAt: -1 });
+jobOrderSchema.index({ vendorName: 1 });
+jobOrderSchema.index({ vendorName: 1, jobType: 1, createdAt: -1 });
 
 const JobOrder = mongoose.model('JobOrder', jobOrderSchema);
 JobOrder.JOB_TYPES = JOB_TYPES;

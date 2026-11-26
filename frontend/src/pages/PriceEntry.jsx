@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
 import { getInward, updatePrice } from "../api/api";
 import { loadInPages } from "../api/paged";
-import { formatNum, exportXlsx, formatDateTime } from "../utils/helpers";
+import { formatNum, exportXlsx, formatDateTime, todayStr } from "../utils/helpers";
 // NOTE: adjust this import path if your AuthContext file lives elsewhere.
 import { useAuth } from "../context/AuthContext";
 import Pagination from "../components/Pagination";
@@ -435,40 +435,67 @@ export default function PriceEntry() {
     price: [],
   });
 
+  const [fromDate, setFromDate] = useState(() => todayStr());
+  const [toDate, setToDate] = useState(() => todayStr());
+  const fromDateRef = useRef(fromDate);
+  const toDateRef = useRef(toDate);
+  useEffect(() => {
+    fromDateRef.current = fromDate;
+  }, [fromDate]);
+  useEffect(() => {
+    toDateRef.current = toDate;
+  }, [toDate]);
+
   const [listNote, setListNote] = useState("");
   const loadGen = useRef(0);
 
   const load = useCallback(async () => {
     const gen = ++loadGen.current;
-    setListNote("Loading entries…");
+    const from = fromDateRef.current;
+    const to = toDateRef.current;
+    setListNote(
+      from || to
+        ? "Loading entries…"
+        : "Loading all entries… this may take a moment",
+    );
     let seeded = false;
     try {
-      await loadInPages((params) => getInward(params), {
-        isCancelled: () => gen !== loadGen.current,
-        onUpdate: (rows, info) => {
-          if (gen !== loadGen.current) return;
-          const reset = !seeded;
-          seeded = true;
-          setEntries(rows);
-          setPrices((prev) => {
-            const next = reset ? {} : { ...prev };
-            for (const e of rows) {
-              if (next[e._id] === undefined) next[e._id] = e.price ?? 0;
-            }
-            return next;
-          });
-          setListNote(
-            info.complete ? "" : `Loading entries… ${rows.length} of ${info.total}`,
-          );
+      await loadInPages(
+        (params) =>
+          getInward({
+            ...params,
+            ...(from ? { from } : {}),
+            ...(to ? { to } : {}),
+          }),
+        {
+          isCancelled: () => gen !== loadGen.current,
+          onUpdate: (rows, info) => {
+            if (gen !== loadGen.current) return;
+            const reset = !seeded;
+            seeded = true;
+            setEntries(rows);
+            setPrices((prev) => {
+              const next = reset ? {} : { ...prev };
+              for (const e of rows) {
+                if (next[e._id] === undefined) next[e._id] = e.price ?? 0;
+              }
+              return next;
+            });
+            setListNote(
+              info.complete
+                ? ""
+                : `Loading entries… ${rows.length} of ${info.total}`,
+            );
+          },
         },
-      });
+      );
     } catch (e) {
       if (gen === loadGen.current) setListNote(e.message || "Could not load entries");
     }
   }, []);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, fromDate, toDate]);
 
   // A row can be edited by Purchase only while its price is still 0 (first
   // entry). Once a price exists, only Admin may change it.
@@ -1002,6 +1029,39 @@ export default function PriceEntry() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by material name or code…"
           />
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-3)" }}>
+            From
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              onClick={(e) => e.target.showPicker && e.target.showPicker()}
+              style={{ cursor: "pointer" }}
+            />
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-3)" }}>
+            To
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              onClick={(e) => e.target.showPicker && e.target.showPicker()}
+              style={{ cursor: "pointer" }}
+            />
+          </label>
+          {(fromDate || toDate) && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setFromDate("");
+                setToDate("");
+              }}
+              title="Clear dates to load full history"
+            >
+              Clear dates
+            </button>
+          )}
           <label
             style={{
               display: "inline-flex",

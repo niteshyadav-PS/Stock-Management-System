@@ -202,7 +202,7 @@ export default function VendorDashboard() {
     setLoading(true);
     setErr("");
     try {
-      const list = unwrapList(await getJobOrders({ jobType }));
+      const list = unwrapList(await getJobOrders({ jobType, full: 1 }));
       setOrders(list);
     } catch (e) {
       setErr(e.message || "Could not load dashboard");

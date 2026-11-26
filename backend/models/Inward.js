@@ -27,5 +27,8 @@ inwardSchema.index({ date: -1 });
 inwardSchema.index({ category: 1 });
 inwardSchema.index({ vendor: 1 });
 inwardSchema.index({ createdAt: -1 });
+inwardSchema.index({ po: 1 });
+inwardSchema.index({ price: 1 });
+inwardSchema.index({ price: 1, date: -1 });
 
 module.exports = mongoose.model('Inward', inwardSchema);

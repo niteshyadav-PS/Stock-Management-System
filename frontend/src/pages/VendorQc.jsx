@@ -207,7 +207,7 @@ export default function VendorQc({ embedded = false, jobType = null, onUpdated }
       // Vendor API already scopes by company + job type; still pass jobType for clarity.
       // QC loads both (no jobType). Embedded admin loads the page type only.
       const params = lockedJobType ? { jobType: lockedJobType } : {};
-      const list = unwrapList(await getJobOrders(params));
+      const list = unwrapList(await getJobOrders({ ...params, full: 1 }));
       setOrders(list);
       // Do not auto-open Receive modal on load/refresh — vendor opens it via Receive.
     } catch (err) {
