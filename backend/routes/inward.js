@@ -286,6 +286,7 @@ router.post('/bulk', authMiddleware, requireRole('admin','store','store_manager'
     if (!clean.length) return res.status(400).json({ error: 'No valid entries after validation.' });
 
     const docs = await Inward.insertMany(clean, { ordered: false });
+    const items = docs.map((d) => (d.toObject ? d.toObject() : d));
 
     // Check PR auto-receive for all unique PO numbers in this batch
     const poNumbers = [...new Set(clean.map(d => d.po).filter(Boolean))];
@@ -293,7 +294,7 @@ router.post('/bulk', authMiddleware, requireRole('admin','store','store_manager'
       await checkAndReceivePR(poNumbers, req.user.name, req.user.username);
     }
 
-    res.status(201).json({ inserted: docs.length });
+    res.status(201).json({ inserted: items.length, items });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

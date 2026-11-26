@@ -970,18 +970,44 @@ export default function InwardEntry() {
     loadEntries(gen);
   }, [fromDate, toDate, loadEntries]);
 
-  // After create/edit/delete only inward (+ pending POs) change — skip master re-fetch.
+  // Light refresh: pending POs only — do not reload the entry list.
+  const refreshPendingPOs = useCallback(async () => {
+    try {
+      const pos = await getPendingInwardPOs();
+      setPoList(Array.isArray(pos) ? pos : []);
+    } catch {
+      /* keep current PO list */
+    }
+  }, []);
+
+  function prependEntries(saved) {
+    const rows = (Array.isArray(saved) ? saved : [saved]).filter(Boolean);
+    if (!rows.length) return;
+    setEntries((prev) => [...rows, ...prev]);
+  }
+
+  function patchEntry(saved) {
+    if (!saved?._id) return;
+    setEntries((prev) =>
+      prev.map((e) => (String(e._id) === String(saved._id) ? { ...e, ...saved } : e)),
+    );
+  }
+
+  function removeEntriesById(ids) {
+    const idSet = new Set((Array.isArray(ids) ? ids : [ids]).map(String));
+    setEntries((prev) => prev.filter((e) => !idSet.has(String(e._id))));
+  }
+
+  // Full list reload only when needed (e.g. Fix past names).
   const reloadInward = useCallback(async () => {
     const gen = ++loadGen.current;
     try {
-      const pos = await getPendingInwardPOs();
-      if (gen !== loadGen.current) return;
-      setPoList(Array.isArray(pos) ? pos : []);
+      await refreshPendingPOs();
       await loadEntries(gen);
     } catch (e) {
       if (gen === loadGen.current) setMsg({ text: e.message, ok: false });
     }
-  }, [loadEntries]);
+  }, [loadEntries, refreshPendingPOs]);
 
   // Consume the PR hand-off once the PO dropdown data is available.
   useEffect(() => {
@@ -1441,14 +1467,15 @@ export default function InwardEntry() {
           remarks: r.remarks,
           price: 0,
         }));
-        await bulkInward(batch);
+        const res = await bulkInward(batch);
         setMsg({
           text: `✓ ${batch.length} inward entr${batch.length === 1 ? "y" : "ies"} saved from ${form.po}.`,
           ok: true,
         });
         setForm({ ...EMPTY, date: form.date });
         setPoRows([]);
-        reloadInward();
+        prependEntries(res?.items || []);
+        refreshPendingPOs();
         setTimeout(() => setMsg({ text: "", ok: true }), 5000);
       } catch (err) {
         setMsg({ text: "Error: " + err.message, ok: false });
@@ -1503,8 +1530,14 @@ export default function InwardEntry() {
           remarks: r.remarks,
           price: 0,
         }));
-        if (batch.length === 1) await addInward(batch[0]);
-        else await bulkInward(batch);
+        let saved = [];
+        if (batch.length === 1) {
+          const created = await addInward(batch[0]);
+          saved = created ? [created] : [];
+        } else {
+          const res = await bulkInward(batch);
+          saved = res?.items || [];
+        }
 
         setMsg({
           text: `✓ ${validRows.length} inward entr${validRows.length === 1 ? "y" : "ies"} saved.`,
@@ -1512,7 +1545,8 @@ export default function InwardEntry() {
         });
         setForm({ ...EMPTY, date: todayStr() });
         setManualRows([emptyManualRow()]);
-        reloadInward();
+        prependEntries(saved);
+        refreshPendingPOs();
         setTimeout(() => setMsg({ text: "", ok: true }), 4000);
       } catch (err) {
         setMsg({ text: "Error: " + err.message, ok: false });
@@ -1523,12 +1557,13 @@ export default function InwardEntry() {
   }
 
   async function handleEditSave(id, data) {
-    await updateInward(id, {
+    const updated = await updateInward(id, {
       ...data,
       by: data.by === OTHER_VALUE ? "" : data.by,
     });
     setEditEntry(null);
-    reloadInward();
+    patchEntry(updated);
+    refreshPendingPOs();
   }
 
   async function handleDelete(e) {
@@ -1540,7 +1575,8 @@ export default function InwardEntry() {
       return;
     try {
       await deleteInward(e._id);
-      reloadInward();
+      removeEntriesById(e._id);
+      refreshPendingPOs();
     } catch (err) {
       alert("Error: " + err.message);
     }
@@ -1761,8 +1797,10 @@ export default function InwardEntry() {
       if (skippedRows.length)
         parts.push(`${skippedRows.length} skipped — see details below.`);
       setBulkMsg({ text: parts.join(" "), ok: true });
+      if (pending.toDelete.length) removeEntriesById(pending.toDelete);
+      prependEntries(res?.items || []);
       setPending(null);
-      reloadInward();
+      refreshPendingPOs();
     } catch (err) {
       setBulkMsg({ text: "Error: " + err.message, ok: false });
     } finally {

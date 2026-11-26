@@ -664,20 +664,49 @@ export default function OutwardEntry() {
     loadEntries(gen);
   }, [fromDate, toDate, loadEntries]);
 
-  // After create/edit/delete, refresh balances and the list. Skip the master list.
+  // Light refresh: stock balances only — do not reload the entry list.
+  const refreshStockSummary = useCallback(async () => {
+    try {
+      const summary = await getStockSummary();
+      applySummary(summary);
+    } catch {
+      /* keep current balances */
+    }
+  }, [applySummary]);
+
+  function prependEntries(saved) {
+    const rows = (Array.isArray(saved) ? saved : [saved])
+      .filter(Boolean)
+      .map(normalizeOutwardEntry);
+    if (!rows.length) return;
+    setEntries((prev) => [...rows, ...prev]);
+  }
+
+  function patchEntry(saved) {
+    if (!saved?._id) return;
+    const next = normalizeOutwardEntry(saved);
+    setEntries((prev) =>
+      prev.map((e) => (String(e._id) === String(next._id) ? { ...e, ...next } : e)),
+    );
+  }
+
+  function removeEntriesById(ids) {
+    const idSet = new Set((Array.isArray(ids) ? ids : [ids]).map(String));
+    setEntries((prev) => prev.filter((e) => !idSet.has(String(e._id))));
+  }
+
+  // Full list reload only when needed.
   const reloadOutward = useCallback(async () => {
     const gen = ++loadGen.current;
     try {
-      const summary = await getStockSummary();
-      if (gen !== loadGen.current) return;
-      applySummary(summary);
+      await refreshStockSummary();
       await loadEntries(gen);
     } catch (e) {
       if (gen === loadGen.current) {
         setMsg({ text: e.message || "Could not reload entries", ok: false });
       }
     }
-  }, [applySummary, loadEntries]);
+  }, [loadEntries, refreshStockSummary]);
 
   const searched = useMemo(
     () =>
@@ -793,11 +822,13 @@ export default function OutwardEntry() {
       return;
     setBulkDeleting(true);
     try {
-      for (const id of selectedIds) {
+      const ids = [...selectedIds];
+      for (const id of ids) {
         await deleteOutward(id);
       }
       setSelectedIds(new Set());
-      await reloadOutward();
+      removeEntriesById(ids);
+      await refreshStockSummary();
     } catch (err) {
       alert("Error: " + err.message);
     } finally {
@@ -806,9 +837,10 @@ export default function OutwardEntry() {
   }
 
   async function handleEditSave(id, data) {
-    await updateOutward(id, data);
+    const updated = await updateOutward(id, data);
     setEditEntry(null);
-    reloadOutward();
+    patchEntry(updated);
+    refreshStockSummary();
   }
 
   async function handleDelete(e) {
@@ -820,7 +852,8 @@ export default function OutwardEntry() {
       return;
     try {
       await deleteOutward(e._id);
-      reloadOutward();
+      removeEntriesById(e._id);
+      refreshStockSummary();
     } catch (err) {
       alert("Error: " + err.message);
     }
@@ -946,11 +979,14 @@ export default function OutwardEntry() {
         qty: parseFloat(it.qty),
         reqty: parseFloat(it.reqty),
       }));
+      let saved = [];
       if (withNums.length === 1) {
-        await addOutward({ ...header, ...withNums[0] });
+        const created = await addOutward({ ...header, ...withNums[0] });
+        saved = created ? [created] : [];
       } else {
         const batch = withNums.map((it) => ({ ...header, ...it }));
-        await bulkOutward(batch);
+        const res = await bulkOutward(batch);
+        saved = res?.items || [];
       }
       setMsg({
         text: `Outward entr${cleanItems.length === 1 ? "y" : "ies"} saved successfully.`,
@@ -958,7 +994,8 @@ export default function OutwardEntry() {
       });
       setHeader({ ...EMPTY_HEADER, date: todayStr() });
       setItems([{ ...EMPTY_ITEM }]);
-      reloadOutward();
+      prependEntries(saved);
+      refreshStockSummary();
       setTimeout(() => setMsg({ text: "", ok: true }), 4000);
     } catch (err) {
       setMsg({ text: "Error: " + err.message, ok: false });
@@ -1064,7 +1101,8 @@ export default function OutwardEntry() {
         text: `✓ ${res.inserted} entr${res.inserted === 1 ? "y" : "ies"} imported.${skipped ? ` ${skipped} skipped.` : ""}`,
         ok: true,
       });
-      reloadOutward();
+      prependEntries(res?.items || []);
+      refreshStockSummary();
     } catch (err) {
       setBulkMsg({ text: "Error: " + err.message, ok: false });
     }

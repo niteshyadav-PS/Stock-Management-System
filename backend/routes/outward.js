@@ -60,7 +60,10 @@ router.post('/bulk', authMiddleware, requireRole(...OUTWARD_EDIT_ROLES), async (
     if (!Array.isArray(entries) || !entries.length)
       return res.status(400).json({ error: 'No entries provided' });
     const docs = await Outward.insertMany(entries.map(normalizeOutwardPayload), { ordered: false });
-    res.status(201).json({ inserted: docs.length });
+    const items = docs.map((d) =>
+      normalizeOutwardResponse(d.toObject ? d.toObject() : d),
+    );
+    res.status(201).json({ inserted: items.length, items });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
