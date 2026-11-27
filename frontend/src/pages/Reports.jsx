@@ -714,12 +714,6 @@ export default function Reports() {
   function runReport() {
     setCfBoth(emptyCfBoth);
     setCfTxn(emptyCfTxn);
-    if (!dateFrom && !dateTo && (inward.length > 2000 || outward.length > 2000)) {
-      const ok = window.confirm(
-        `No date range selected (${Math.max(inward.length, outward.length)} rows loaded). it's take some time to generate the report.`,
-      );
-      if (!ok) return;
-    }
     if (repType === "both") {
       const hasEntryFilter = Boolean(
         dateFrom || dateTo || category || vendor || material || project,
