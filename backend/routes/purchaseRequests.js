@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const PurchaseRequest = require('../models/PurchaseRequest');
+const PurchaseOrder = require('../models/PurchaseOrder');
 const { nextSeq } = require('../models/Counter');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { parsePagination, paginateQuery } = require('../utils/paginate');
@@ -10,6 +11,8 @@ const CREATOR_ROLES = ['admin', 'store', 'store_manager', 'viewer'];
 const APPROVER_ROLES = ['admin', 'store_manager'];
 // Roles that can set/edit reference pricing on a PR's items
 const PRICING_ROLES = ['admin', 'purchase'];
+// Roles that can delete an approved PR (before any PO exists)
+const DELETE_APPROVED_ROLES = ['admin', 'purchase', 'store_manager'];
 
 // Valid lifecycle transitions
 const TRANSITIONS = {
@@ -153,21 +156,57 @@ router.patch('/:id/item-prices', authMiddleware, requireRole(...PRICING_ROLES), 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/purchase-requests/:id — cancel a request (only while pending, by its owner or admin)
-router.delete('/:id', authMiddleware, requireRole(...CREATOR_ROLES), async (req, res) => {
-  try {
-    const pr = await PurchaseRequest.findById(req.params.id);
-    if (!pr) return res.status(404).json({ error: 'Not found' });
-    const isOwner = pr.requestedByUsername === req.user.username;
-    if (!isOwner && req.user.role !== 'admin')
-      return res.status(403).json({ error: 'You can only cancel your own requests.' });
-    if (pr.status !== 'pending')
-      return res.status(400).json({ error: `Cannot cancel a request that is already ${pr.status}.` });
+// DELETE /api/purchase-requests/:id
+// - pending: owner (creator roles) or admin
+// - approved: admin or purchase (blocked if any PO already exists)
+router.delete(
+  '/:id',
+  authMiddleware,
+  requireRole('admin', 'store', 'store_manager', 'viewer', 'purchase'),
+  async (req, res) => {
+    try {
+      const pr = await PurchaseRequest.findById(req.params.id);
+      if (!pr) return res.status(404).json({ error: 'Not found' });
 
-    await PurchaseRequest.findByIdAndDelete(req.params.id);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+      if (pr.status === 'pending') {
+        if (!CREATOR_ROLES.includes(req.user.role)) {
+          return res.status(403).json({ error: 'Not allowed to cancel this request.' });
+        }
+        const isOwner = pr.requestedByUsername === req.user.username;
+        if (!isOwner && req.user.role !== 'admin') {
+          return res
+            .status(403)
+            .json({ error: 'You can only cancel your own requests.' });
+        }
+      } else if (pr.status === 'approved') {
+        if (!DELETE_APPROVED_ROLES.includes(req.user.role)) {
+          return res
+            .status(403)
+            .json({
+              error:
+                'Only Admin, Purchase, or Store Manager can delete an approved PR.',
+            });
+        }
+        const poCount = await PurchaseOrder.countDocuments({ prId: pr._id });
+        if (poCount > 0) {
+          return res.status(400).json({
+            error:
+              'Cannot delete this approved PR — purchase order(s) already exist. Remove the PO(s) first.',
+          });
+        }
+      } else {
+        return res.status(400).json({
+          error: `Cannot delete a request that is already ${pr.status}.`,
+        });
+      }
+
+      await PurchaseRequest.findByIdAndDelete(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // PATCH /api/purchase-requests/:id/status — move a request through its lifecycle
 // (Purchase team / admin only)

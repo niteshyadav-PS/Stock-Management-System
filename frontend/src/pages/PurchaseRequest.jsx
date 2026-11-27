@@ -550,6 +550,10 @@ export default function PurchaseRequest() {
   const location = useLocation();
   const canCreate = CREATOR_ROLES.includes(user?.role);
   const canReview = APPROVER_ROLES.includes(user?.role);
+  // Delete approved PR: admin / purchase / store manager
+  const canDeleteApproved = ["admin", "purchase", "store_manager"].includes(
+    user?.role,
+  );
   // Create PO: purchase/admin only — not store team
   const canPendingCreatePO = ["admin", "purchase"].includes(user?.role);
   // Inward: store team (+ admin)
@@ -755,6 +759,21 @@ export default function PurchaseRequest() {
       await deletePurchaseRequest(pr._id);
       load();
     } catch (err) { alert(err.message); }
+  }
+
+  async function handleDeleteApproved(pr) {
+    if (
+      !window.confirm(
+        `Delete approved request ${pr.prNumber}? This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await deletePurchaseRequest(pr._id);
+      load();
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   async function handleApprove(pr) {
@@ -1679,6 +1698,17 @@ export default function PurchaseRequest() {
                           )}
                           {canPendingCreatePO && prNeedsCreatePO(pr) && (
                             <button className="btn btn-sm btn-in" onClick={() => navigate("/purchase-orders")}>Pending Create PO</button>
+                          )}
+                          {canDeleteApproved && pr.status === "approved" && (
+                            <button
+                              type="button"
+                              className="btn-del btn-sm"
+                              onClick={() => handleDeleteApproved(pr)}
+                              title={`Delete ${pr.prNumber}`}
+                              aria-label={`Delete ${pr.prNumber}`}
+                            >
+                              🗑
+                            </button>
                           )}
                           {canPendingInward && pr.status === "ordered" && (
                             <button className="btn btn-sm btn-in" onClick={() => goToInward(pr)}>Pending Inward Entry</button>
