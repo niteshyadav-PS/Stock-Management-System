@@ -10,12 +10,18 @@ import { createPortal } from "react-dom";
 import { getMaster, getInward, getOutward, getStockSummary, unwrapList } from "../api/api";
 import { loadInPages } from "../api/paged";
 import { useAuth } from "../context/AuthContext";
-import { formatNum, formatINR, exportXlsx, todayStr, toDDMMYYYY } from "../utils/helpers";
+import {
+  formatNum,
+  formatINR,
+  exportXlsx,
+  todayStr,
+  daysAgoStr,
+  toDDMMYYYY,
+} from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { sortByColumn } from "../components/NumSort";
 import { stockRowsFromSummary, summaryToMaps } from "../utils/stockMaps";
-import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 // ── Excel-style dropdown filter — portal-based, with Apply button ────────────
 function ColFilter({
@@ -87,19 +93,29 @@ function ColFilter({
     setOpen((v) => !v);
   }
 
-  const unique = [...new Set(values.filter(Boolean))];
-  const toNum = (v) => {
-    const c = String(v).replace(/[^0-9.\-]/g, "");
-    return c === "" || c === "-" ? NaN : parseFloat(c);
-  };
-  const isNum = unique.every((v) => !isNaN(toNum(v)));
-  unique.sort((a, b) =>
-    isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
-  );
+  // Only build/sort unique lists while open — doing this on every render for
+  // thousands of rows (× many columns) freezes the page after Generate.
+  const unique = useMemo(() => {
+    if (!open) return [];
+    const list = [...new Set((values || []).filter(Boolean))];
+    const toNum = (v) => {
+      const c = String(v).replace(/[^0-9.\-]/g, "");
+      return c === "" || c === "-" ? NaN : parseFloat(c);
+    };
+    const isNum = list.length > 0 && list.every((v) => !isNaN(toNum(v)));
+    list.sort((a, b) =>
+      isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
+    );
+    return list;
+  }, [open, values]);
 
-  const filtered = unique.filter((v) =>
-    String(v).toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = useMemo(() => {
+    if (!open) return [];
+    const q = search.toLowerCase();
+    if (!q) return unique;
+    return unique.filter((v) => String(v).toLowerCase().includes(q));
+  }, [open, unique, search]);
+
   const allSelected = pending.length === unique.length && unique.length > 0;
   const someSelected = pending.length > 0 && pending.length < unique.length;
 
@@ -527,29 +543,8 @@ export default function Reports() {
     return hasReqty(r) ? Number(r.reqty) - Number(r.qty) : null;
   }
 
-  // Filter dropdowns: prefer last generated entry set; fall back to master.
-  const filterSourceEntries = useMemo(() => {
-    if (repType === "inward") return inward;
-    if (repType === "outward") return outward;
-    return [...inward, ...outward];
-  }, [repType, inward, outward]);
-
-  const matchReportFiltersExcept = useCallback(
-    (e, excludeKey) => {
-      if (dateFrom && e.date < dateFrom) return false;
-      if (dateTo && e.date > dateTo) return false;
-      if (excludeKey !== "category" && category && e.category !== category)
-        return false;
-      if (excludeKey !== "vendor" && vendor && e.vendor !== vendor) return false;
-      if (excludeKey !== "material" && material && e.name !== material)
-        return false;
-      if (excludeKey !== "project" && project && e.project !== project)
-        return false;
-      return true;
-    },
-    [dateFrom, dateTo, category, vendor, material, project],
-  );
-
+  // Top filters use master (and small unique sets) — never rebuild huge
+  // <select> option lists from thousands of generated report rows.
   const uniqueSorted = (values, current) => {
     const list = [...new Set((values || []).filter(Boolean))].sort((a, b) =>
       String(a).localeCompare(String(b), undefined, { sensitivity: "base" }),
@@ -558,48 +553,35 @@ export default function Reports() {
     return list;
   };
 
-  const categories = useMemo(() => {
-    const fromEntries = filterSourceEntries
-      .filter((e) => matchReportFiltersExcept(e, "category"))
-      .map((e) => e.category);
-    const base =
-      fromEntries.some(Boolean) || filterSourceEntries.length
-        ? fromEntries
-        : master.map((m) => m.category);
-    return uniqueSorted(base, category);
-  }, [filterSourceEntries, matchReportFiltersExcept, master, category]);
+  const categories = useMemo(
+    () => uniqueSorted(master.map((m) => m.category), category),
+    [master, category],
+  );
 
   const vendors = useMemo(() => {
-    if (repType === "outward") return uniqueSorted([], vendor);
+    if (repType === "outward") return [];
     return uniqueSorted(
-      inward
-        .filter((e) => matchReportFiltersExcept(e, "vendor"))
-        .map((e) => e.vendor),
+      inward.map((e) => e.vendor).filter(Boolean).slice(0, 500),
       vendor,
     );
-  }, [repType, inward, matchReportFiltersExcept, vendor]);
+  }, [repType, inward, vendor]);
 
+  // Cap select options — rendering 1k+ <option> nodes freezes the browser.
   const materials = useMemo(() => {
-    const fromEntries = filterSourceEntries
-      .filter((e) => matchReportFiltersExcept(e, "material"))
-      .map((e) => e.name);
-    const base =
-      fromEntries.some(Boolean) || filterSourceEntries.length
-        ? fromEntries
-        : master.map((m) => m.name);
-    return uniqueSorted(base, material);
-  }, [filterSourceEntries, matchReportFiltersExcept, master, material]);
+    const all = uniqueSorted(
+      master.map((m) => m.name),
+      material,
+    );
+    return all.length > 250 ? all.slice(0, 250) : all;
+  }, [master, material]);
 
   const projects = useMemo(() => {
-    if (repType === "inward") return uniqueSorted([], project);
-    const src = outward;
+    if (repType === "inward") return [];
     return uniqueSorted(
-      src
-        .filter((e) => matchReportFiltersExcept(e, "project"))
-        .map((e) => e.project),
+      outward.map((e) => e.project).filter(Boolean).slice(0, 200),
       project,
     );
-  }, [repType, outward, matchReportFiltersExcept, project]);
+  }, [repType, outward, project]);
 
   // Weighted average unit price per material from inward receipts
   // (inward amount ÷ priced inward qty), same figure as Live Stock.
@@ -653,13 +635,17 @@ export default function Reports() {
   };
 
   function filterEntries(entries, from, to) {
+    const matQ = String(material || "").trim().toLowerCase();
+    const projQ = String(project || "").trim().toLowerCase();
     return entries.filter((e) => {
       if (from && e.date < from) return false;
       if (to && e.date > to) return false;
       if (category && e.category !== category) return false;
       if (vendor && e.vendor !== vendor) return false;
-      if (material && e.name !== material) return false;
-      if (project && e.project !== project) return false;
+      if (matQ && !String(e.name || "").toLowerCase().includes(matQ))
+        return false;
+      if (projQ && !String(e.project || "").toLowerCase().includes(projQ))
+        return false;
       return true;
     });
   }
@@ -682,13 +668,17 @@ export default function Reports() {
 
   async function runReport() {
     if (generating) return;
-    const from = dateFrom;
-    const to = dateTo;
+    let from = dateFrom;
+    let to = dateTo;
     if (!from && !to) {
-      const ok = window.confirm(
-        "No date range selected — this loads full history and can freeze the browser on large data.\n\nContinue anyway?",
+      from = todayStr();
+      to = todayStr();
+      window.alert(
+        "A date range is required for Reports. Using today’s date — pick From/To for a wider range (or Last 30 days).",
       );
-      if (!ok) return;
+      // Set dates before generating so the clear-rows effect runs first.
+      setDateFrom(from);
+      setDateTo(to);
     }
 
     const gen = ++loadGen.current;
@@ -722,8 +712,6 @@ export default function Reports() {
             fetchTxnPages(getOutward, dateParams, "outward"),
           ]);
           if (gen !== loadGen.current) return;
-          setInward(inRows);
-          setOutward(outRows);
 
           const filteredIn = filterEntries(inRows, from, to);
           const filteredOut = filterEntries(outRows, from, to);
@@ -785,17 +773,18 @@ export default function Reports() {
       } else if (repType === "inward") {
         const inRows = await fetchTxnPages(getInward, dateParams, "inward");
         if (gen !== loadGen.current) return;
-        setInward(inRows);
         result = filterEntries(inRows, from, to).sort((a, b) =>
           (b.date || "").localeCompare(a.date || ""),
         );
+        // Keep a small sample for vendor suggestions only.
+        setInward(inRows.slice(0, 500));
       } else {
         const outRows = await fetchTxnPages(getOutward, dateParams, "outward");
         if (gen !== loadGen.current) return;
-        setOutward(outRows);
         result = filterEntries(outRows, from, to).sort((a, b) =>
           (b.date || "").localeCompare(a.date || ""),
         );
+        setOutward(outRows.slice(0, 500));
       }
 
       if (gen !== loadGen.current) return;
@@ -809,7 +798,10 @@ export default function Reports() {
             ? `${result.length} record(s) found.`
             : "No records match the selected filters.";
 
-      // Defer heavy table/filter work so the UI stays responsive.
+      // Let the "Generating…" paint finish before mounting the table.
+      await new Promise((r) => setTimeout(r, 0));
+      if (gen !== loadGen.current) return;
+
       startTransition(() => {
         setRows(result);
         setRepMsg(msg);
@@ -916,49 +908,60 @@ export default function Reports() {
     }
   }
 
+  // Cheap unique lists for column filters (no cascading / formatINR over
+  // every row). Cascading was freezing Generate on large outward reports.
+  const cheapColOpts = useCallback((list, getters) => {
+    const out = {};
+    const src = list || [];
+    for (const [key, get] of Object.entries(getters)) {
+      // Cap per-column option source size; ColFilter dedupes when opened.
+      const capped = src.length > 1500 ? src.slice(0, 1500) : src;
+      out[key] = capped.map(get);
+    }
+    return out;
+  }, []);
+
   const colOptsBoth = useMemo(
     () =>
-      buildCascadingColOpts(rows || [], cfBoth, {
+      cheapColOpts(rows, {
         name: (r) => r.name,
         type: (r) => r.type,
         category: (r) => r.category,
         code: (r) => r.code,
         uom: (r) => r.uom,
-        inQty: (r) => String(formatNum(r.inQty)),
-        outQty: (r) => String(formatNum(r.outQty)),
-        balance: (r) => String(formatNum(r.balance)),
-        minStock: (r) => String(formatNum(r.minStock)),
-        avgPrice: (r) => String(formatINR(r.avgPrice)),
-        stockVal: (r) => String(formatINR(r.stockVal)),
+        inQty: (r) => String(r.inQty ?? ""),
+        outQty: (r) => String(r.outQty ?? ""),
+        balance: (r) => String(r.balance ?? ""),
+        minStock: (r) => String(r.minStock ?? ""),
+        avgPrice: (r) => String(r.avgPrice ?? ""),
+        stockVal: (r) => String(r.stockVal ?? ""),
       }),
-    [rows, cfBoth],
+    [rows, cheapColOpts],
   );
 
-  const colOptsTxn = useMemo(
-    () =>
-      buildCascadingColOpts(rows || [], cfTxn, {
-        date: (r) => r.date,
-        name: (r) => r.name,
-        category: (r) => r.category,
-        code: (r) => r.code,
-        uom: (r) => r.uom,
-        qty: (r) => String(formatNum(r.qty)),
-        reqty: (r) => (hasReqty(r) ? String(formatNum(r.reqty)) : "—"),
-        remaining: (r) =>
-          hasReqty(r) ? String(formatNum(remainingQty(r))) : "—",
-        vendor: (r) => r.vendor || "—",
-        price: (r) => String(formatINR(r.price)),
-        value: (r) =>
-          String(
-            formatINR((parseFloat(r.qty) || 0) * (parseFloat(r.price) || 0)),
-          ),
-        avgPrice: (r) => String(formatINR(avgPriceFor(r.name))),
-        evaluation: (r) => String(formatINR(evaluationFor(r))),
-        project: (r) => r.project || "—",
-        remarks: (r) => r.remarks || "—",
-      }),
-    [rows, cfTxn, inwardAvgByName],
-  );
+  const colOptsTxn = useMemo(() => {
+    // Identity columns only — skip price/remarks lists (high cardinality / expensive).
+    const opts = cheapColOpts(rows, {
+      date: (r) => r.date,
+      name: (r) => r.name,
+      category: (r) => r.category,
+      code: (r) => r.code,
+      uom: (r) => r.uom,
+      qty: (r) => String(r.qty ?? ""),
+      reqty: (r) => (hasReqty(r) ? String(r.reqty) : "—"),
+      remaining: (r) => (hasReqty(r) ? String(remainingQty(r)) : "—"),
+      vendor: (r) => r.vendor || "—",
+      project: (r) => r.project || "—",
+    });
+    return {
+      ...opts,
+      price: [],
+      value: [],
+      avgPrice: [],
+      evaluation: [],
+      remarks: [],
+    };
+  }, [rows, cheapColOpts]);
 
   // ── Apply column filters ───────────────────────────────────────────────────
   const filteredRows = useMemo(() => {
@@ -976,17 +979,17 @@ export default function Reports() {
           (!cfBoth.code.length || cfBoth.code.includes(r.code)) &&
           (!cfBoth.uom.length || cfBoth.uom.includes(r.uom)) &&
           (!cfBoth.inQty.length ||
-            cfBoth.inQty.includes(String(formatNum(r.inQty)))) &&
+            cfBoth.inQty.includes(String(r.inQty ?? ""))) &&
           (!cfBoth.outQty.length ||
-            cfBoth.outQty.includes(String(formatNum(r.outQty)))) &&
+            cfBoth.outQty.includes(String(r.outQty ?? ""))) &&
           (!cfBoth.balance.length ||
-            cfBoth.balance.includes(String(formatNum(r.balance)))) &&
+            cfBoth.balance.includes(String(r.balance ?? ""))) &&
           (!cfBoth.minStock.length ||
-            cfBoth.minStock.includes(String(formatNum(r.minStock)))) &&
+            cfBoth.minStock.includes(String(r.minStock ?? ""))) &&
           (!cfBoth.avgPrice.length ||
-            cfBoth.avgPrice.includes(String(formatINR(r.avgPrice)))) &&
+            cfBoth.avgPrice.includes(String(r.avgPrice ?? ""))) &&
           (!cfBoth.stockVal.length ||
-            cfBoth.stockVal.includes(String(formatINR(r.stockVal))))
+            cfBoth.stockVal.includes(String(r.stockVal ?? "")))
         );
       }
       const value = (parseFloat(r.qty) || 0) * (parseFloat(r.price) || 0);
@@ -996,24 +999,20 @@ export default function Reports() {
         (!cfTxn.category.length || cfTxn.category.includes(r.category)) &&
         (!cfTxn.code.length || cfTxn.code.includes(r.code)) &&
         (!cfTxn.uom.length || cfTxn.uom.includes(r.uom)) &&
-        (!cfTxn.qty.length || cfTxn.qty.includes(String(formatNum(r.qty)))) &&
+        (!cfTxn.qty.length || cfTxn.qty.includes(String(r.qty ?? ""))) &&
         (!cfTxn.reqty.length ||
-          cfTxn.reqty.includes(
-            hasReqty(r) ? String(formatNum(r.reqty)) : "—",
-          )) &&
+          cfTxn.reqty.includes(hasReqty(r) ? String(r.reqty) : "—")) &&
         (!cfTxn.remaining.length ||
           cfTxn.remaining.includes(
-            hasReqty(r) ? String(formatNum(remainingQty(r))) : "—",
+            hasReqty(r) ? String(remainingQty(r)) : "—",
           )) &&
         (!cfTxn.vendor.length || cfTxn.vendor.includes(r.vendor || "—")) &&
-        (!cfTxn.price.length ||
-          cfTxn.price.includes(String(formatINR(r.price)))) &&
-        (!cfTxn.value.length ||
-          cfTxn.value.includes(String(formatINR(value)))) &&
+        (!cfTxn.price.length || cfTxn.price.includes(String(r.price ?? ""))) &&
+        (!cfTxn.value.length || cfTxn.value.includes(String(value))) &&
         (!cfTxn.avgPrice.length ||
-          cfTxn.avgPrice.includes(String(formatINR(avgPriceFor(r.name))))) &&
+          cfTxn.avgPrice.includes(String(avgPriceFor(r.name) || 0))) &&
         (!cfTxn.evaluation.length ||
-          cfTxn.evaluation.includes(String(formatINR(evaluationFor(r))))) &&
+          cfTxn.evaluation.includes(String(evaluationFor(r) || 0))) &&
         (!cfTxn.project.length || cfTxn.project.includes(r.project || "—")) &&
         (!cfTxn.remarks.length || cfTxn.remarks.includes(r.remarks || "—"))
       );
@@ -1179,21 +1178,19 @@ export default function Reports() {
                 style={{ cursor: "pointer" }}
               />
             </div>
-            {(dateFrom || dateTo) && (
-              <div className="field" style={{ alignSelf: "end" }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setDateFrom("");
-                    setDateTo("");
-                  }}
-                  title="Clear dates to load full history"
-                >
-                  Clear dates
-                </button>
-              </div>
-            )}
+            <div className="field" style={{ alignSelf: "end" }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setDateFrom(daysAgoStr(30));
+                  setDateTo(todayStr());
+                }}
+                title="Set date range to the last 30 days"
+              >
+                Last 30 days
+              </button>
+            </div>
             {repType !== "outward" && (
               <div className="field">
                 <label>Vendor</label>
@@ -1212,32 +1209,34 @@ export default function Reports() {
             )}
             <div className="field">
               <label>Material</label>
-              <select
+              <input
+                type="text"
                 value={material}
                 onChange={(e) => setMaterial(e.target.value)}
-              >
-                <option value="">All materials</option>
+                placeholder="All materials (type to filter)"
+                list="report-material-suggestions"
+              />
+              <datalist id="report-material-suggestions">
                 {materials.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
+                  <option key={m} value={m} />
                 ))}
-              </select>
+              </datalist>
             </div>
             {repType !== "inward" && (
               <div className="field">
                 <label>Project</label>
-                <select
+                <input
+                  type="text"
                   value={project}
                   onChange={(e) => setProject(e.target.value)}
-                >
-                  <option value="">All projects</option>
+                  placeholder="All projects (type to filter)"
+                  list="report-project-suggestions"
+                />
+                <datalist id="report-project-suggestions">
                   {projects.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
+                    <option key={p} value={p} />
                   ))}
-                </select>
+                </datalist>
               </div>
             )}
           </div>
