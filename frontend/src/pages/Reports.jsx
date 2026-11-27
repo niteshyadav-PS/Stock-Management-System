@@ -716,7 +716,7 @@ export default function Reports() {
     setCfTxn(emptyCfTxn);
     if (!dateFrom && !dateTo && (inward.length > 2000 || outward.length > 2000)) {
       const ok = window.confirm(
-        `No date range selected (${Math.max(inward.length, outward.length)} rows loaded). Generating may freeze the browser.\n\nSet From/To (default is last 30 days) for a faster report.\n\nContinue anyway?`,
+        `No date range selected (${Math.max(inward.length, outward.length)} rows loaded). it's take some time to generate the report.`,
       );
       if (!ok) return;
     }
