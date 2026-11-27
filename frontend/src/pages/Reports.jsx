@@ -1145,7 +1145,15 @@ export default function Reports() {
                 style={{ cursor: "pointer" }}
               />
             </div>
-            <div className="field" style={{ alignSelf: "end" }}>
+            <div
+              className="field"
+              style={{
+                alignSelf: "end",
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1157,6 +1165,19 @@ export default function Reports() {
               >
                 Last 30 days
               </button>
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                  title="Clear dates to load full history (all-time report)"
+                >
+                  Clear dates
+                </button>
+              )}
             </div>
             {repType !== "outward" && (
               <div className="field">
