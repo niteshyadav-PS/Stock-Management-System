@@ -270,7 +270,7 @@ export const acknowledgeJobOrder = (id, data) =>
 export const receiveJobOrder = (id, data) =>
   client.patch(`/job-orders/${id}/receive`, data);
 
-// ── Job-order vendors (powder coating / fabrication master) ───────────────────
+// ── Job-order vendors (powder coating / fabrication master) ────────
 export const getJobOrderVendors = (params) =>
   client.get(withQuery("/job-order-vendors", params || {}));
 
@@ -285,7 +285,7 @@ export const deleteJobOrderVendor = (id, hard = false) =>
     hard ? `/job-order-vendors/${id}?hard=1` : `/job-order-vendors/${id}`,
   );
 
-// ── Inward vendors (supplier master for inward entry) ─────────────────────────
+// ── Inward vendors (supplier master for inward entry) ──────────────────
 export const getInwardVendors = (params) =>
   client.get(withQuery("/inward-vendors", params || {}));
 

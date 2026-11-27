@@ -25,15 +25,31 @@ export function matchesColFilter(selected, value) {
  */
 export function buildCascadingColOpts(rows, colFilters, getters) {
   const keys = Object.keys(getters || {});
+  const list = rows || [];
+  // Project once — cascading used to re-run every getter per column (O(cols²·n)).
+  const projected = list.map((row) => {
+    const vals = {};
+    for (const key of keys) vals[key] = getters[key](row);
+    return vals;
+  });
+
+  const anyActive = keys.some((k) => colFilters?.[k]?.length);
   const out = {};
+  if (!anyActive) {
+    for (const key of keys) {
+      out[key] = projected.map((vals) => vals[key]);
+    }
+    return out;
+  }
+
   for (const key of keys) {
-    const subset = (rows || []).filter((row) =>
+    const subset = projected.filter((vals) =>
       keys.every((k) => {
         if (k === key) return true;
-        return matchesColFilter(colFilters?.[k], getters[k](row));
+        return matchesColFilter(colFilters?.[k], vals[k]);
       }),
     );
-    out[key] = subset.map((row) => getters[key](row));
+    out[key] = subset.map((vals) => vals[key]);
   }
   return out;
 }
