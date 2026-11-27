@@ -1145,27 +1145,8 @@ export default function Reports() {
                 style={{ cursor: "pointer" }}
               />
             </div>
-            <div
-              className="field"
-              style={{
-                alignSelf: "end",
-                display: "flex",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  setDateFrom(daysAgoStr(30));
-                  setDateTo(todayStr());
-                }}
-                title="Reset to last 30 days"
-              >
-                Last 30 days
-              </button>
-              {(dateFrom || dateTo) && (
+            {(dateFrom || dateTo) && (
+              <div className="field" style={{ alignSelf: "end" }}>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -1177,8 +1158,8 @@ export default function Reports() {
                 >
                   Clear dates
                 </button>
-              )}
-            </div>
+              </div>
+            )}
             {repType !== "outward" && (
               <div className="field">
                 <label>Vendor</label>
