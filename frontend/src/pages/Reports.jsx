@@ -1,27 +1,14 @@
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-  startTransition,
-} from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { getMaster, getInward, getOutward, getStockSummary, unwrapList } from "../api/api";
 import { loadInPages } from "../api/paged";
 import { useAuth } from "../context/AuthContext";
-import {
-  formatNum,
-  formatINR,
-  exportXlsx,
-  todayStr,
-  daysAgoStr,
-  toDDMMYYYY,
-} from "../utils/helpers";
+import { formatNum, formatINR, exportXlsx, todayStr, toDDMMYYYY } from "../utils/helpers";
 import Pagination from "../components/Pagination";
 import useClientPagination from "../hooks/useClientPagination";
 import { sortByColumn } from "../components/NumSort";
 import { stockRowsFromSummary, summaryToMaps } from "../utils/stockMaps";
+import { buildCascadingColOpts } from "../utils/cascadingFilters";
 
 // ── Excel-style dropdown filter — portal-based, with Apply button ────────────
 function ColFilter({
@@ -93,29 +80,19 @@ function ColFilter({
     setOpen((v) => !v);
   }
 
-  // Only build/sort unique lists while open — doing this on every render for
-  // thousands of rows (× many columns) freezes the page after Generate.
-  const unique = useMemo(() => {
-    if (!open) return [];
-    const list = [...new Set((values || []).filter(Boolean))];
-    const toNum = (v) => {
-      const c = String(v).replace(/[^0-9.\-]/g, "");
-      return c === "" || c === "-" ? NaN : parseFloat(c);
-    };
-    const isNum = list.length > 0 && list.every((v) => !isNaN(toNum(v)));
-    list.sort((a, b) =>
-      isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
-    );
-    return list;
-  }, [open, values]);
+  const unique = [...new Set(values.filter(Boolean))];
+  const toNum = (v) => {
+    const c = String(v).replace(/[^0-9.\-]/g, "");
+    return c === "" || c === "-" ? NaN : parseFloat(c);
+  };
+  const isNum = unique.every((v) => !isNaN(toNum(v)));
+  unique.sort((a, b) =>
+    isNum ? toNum(a) - toNum(b) : String(a).localeCompare(String(b)),
+  );
 
-  const filtered = useMemo(() => {
-    if (!open) return [];
-    const q = search.toLowerCase();
-    if (!q) return unique;
-    return unique.filter((v) => String(v).toLowerCase().includes(q));
-  }, [open, unique, search]);
-
+  const filtered = unique.filter((v) =>
+    String(v).toLowerCase().includes(search.toLowerCase()),
+  );
   const allSelected = pending.length === unique.length && unique.length > 0;
   const someSelected = pending.length > 0 && pending.length < unique.length;
 
@@ -463,8 +440,8 @@ export default function Reports() {
 
   const [repType, setRepType] = useState("inward");
   const [numSort, setNumSort] = useState(null);
-  const [dateFrom, setDateFrom] = useState(() => todayStr());
-  const [dateTo, setDateTo] = useState(() => todayStr());
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [category, setCategory] = useState("");
   const [vendor, setVendor] = useState("");
   const [material, setMaterial] = useState("");
@@ -504,36 +481,60 @@ export default function Reports() {
   });
 
   const [listNote, setListNote] = useState("");
-  const [generating, setGenerating] = useState(false);
   const loadGen = useRef(0);
 
-  // Meta only on open — transaction history loads when Generate is clicked.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [m, s] = await Promise.all([getMaster(), getStockSummary()]);
-        if (cancelled) return;
-        setMaster(unwrapList(m));
-        setSummary(s);
-      } catch (e) {
-        if (!cancelled) setListNote(e.message || "Could not load master/summary");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    const gen = ++loadGen.current;
+    try {
+      const [m, s] = await Promise.all([getMaster(), getStockSummary()]);
+      if (gen !== loadGen.current) return;
+      setMaster(unwrapList(m));
+      setSummary(s);
+      setListNote("Loading report data…");
+      let inDone = false;
+      let outDone = false;
+      const finish = () => {
+        if (gen === loadGen.current && inDone && outDone) setListNote("");
+      };
+      await Promise.all([
+        loadInPages((params) => getInward(params), {
+          isCancelled: () => gen !== loadGen.current,
+          onUpdate: (rows, info) => {
+            if (gen !== loadGen.current) return;
+            setInward(rows);
+            if (info.complete) {
+              inDone = true;
+              finish();
+            } else {
+              setListNote(`Loading inward… ${rows.length} of ${info.total}`);
+            }
+          },
+        }),
+        loadInPages((params) => getOutward(params), {
+          isCancelled: () => gen !== loadGen.current,
+          onUpdate: (rows, info) => {
+            if (gen !== loadGen.current) return;
+            setOutward(rows);
+            if (info.complete) {
+              outDone = true;
+              finish();
+            } else {
+              setListNote(`Loading outward… ${rows.length} of ${info.total}`);
+            }
+          },
+        }),
+      ]);
+    } catch (e) {
+      if (gen === loadGen.current) setListNote(e.message || "Could not load report");
+    }
   }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     setNumSort(null);
   }, [repType]);
-
-  // Filters/dates only apply on the next Generate — clear stale results.
-  useEffect(() => {
-    setRows(null);
-    setRepMsg("");
-  }, [dateFrom, dateTo, category, vendor, material, project]);
 
   // ── Helpers for Required Qty / Remaining Qty (outward entries only) ───────
   function hasReqty(r) {
@@ -543,8 +544,30 @@ export default function Reports() {
     return hasReqty(r) ? Number(r.reqty) - Number(r.qty) : null;
   }
 
-  // Top filters use master (and small unique sets) — never rebuild huge
-  // <select> option lists from thousands of generated report rows.
+  // Cascading top filters: each dropdown only lists values related to the
+  // other selected filters (Excel-style), scoped by report type + dates.
+  const filterSourceEntries = useMemo(() => {
+    if (repType === "inward") return inward;
+    if (repType === "outward") return outward;
+    return [...inward, ...outward];
+  }, [repType, inward, outward]);
+
+  const matchReportFiltersExcept = useCallback(
+    (e, excludeKey) => {
+      if (dateFrom && e.date < dateFrom) return false;
+      if (dateTo && e.date > dateTo) return false;
+      if (excludeKey !== "category" && category && e.category !== category)
+        return false;
+      if (excludeKey !== "vendor" && vendor && e.vendor !== vendor) return false;
+      if (excludeKey !== "material" && material && e.name !== material)
+        return false;
+      if (excludeKey !== "project" && project && e.project !== project)
+        return false;
+      return true;
+    },
+    [dateFrom, dateTo, category, vendor, material, project],
+  );
+
   const uniqueSorted = (values, current) => {
     const list = [...new Set((values || []).filter(Boolean))].sort((a, b) =>
       String(a).localeCompare(String(b), undefined, { sensitivity: "base" }),
@@ -553,35 +576,48 @@ export default function Reports() {
     return list;
   };
 
-  const categories = useMemo(
-    () => uniqueSorted(master.map((m) => m.category), category),
-    [master, category],
-  );
+  const categories = useMemo(() => {
+    const fromEntries = filterSourceEntries
+      .filter((e) => matchReportFiltersExcept(e, "category"))
+      .map((e) => e.category);
+    // Fall back to master categories when no entry data yet / empty scope.
+    const base =
+      fromEntries.some(Boolean) || filterSourceEntries.length
+        ? fromEntries
+        : master.map((m) => m.category);
+    return uniqueSorted(base, category);
+  }, [filterSourceEntries, matchReportFiltersExcept, master, category]);
 
   const vendors = useMemo(() => {
-    if (repType === "outward") return [];
+    const src = repType === "outward" ? [] : inward;
     return uniqueSorted(
-      inward.map((e) => e.vendor).filter(Boolean).slice(0, 500),
+      src
+        .filter((e) => matchReportFiltersExcept(e, "vendor"))
+        .map((e) => e.vendor),
       vendor,
     );
-  }, [repType, inward, vendor]);
+  }, [repType, inward, matchReportFiltersExcept, vendor]);
 
-  // Cap select options — rendering 1k+ <option> nodes freezes the browser.
   const materials = useMemo(() => {
-    const all = uniqueSorted(
-      master.map((m) => m.name),
-      material,
-    );
-    return all.length > 250 ? all.slice(0, 250) : all;
-  }, [master, material]);
+    const fromEntries = filterSourceEntries
+      .filter((e) => matchReportFiltersExcept(e, "material"))
+      .map((e) => e.name);
+    const base =
+      fromEntries.some(Boolean) || filterSourceEntries.length
+        ? fromEntries
+        : master.map((m) => m.name);
+    return uniqueSorted(base, material);
+  }, [filterSourceEntries, matchReportFiltersExcept, master, material]);
 
   const projects = useMemo(() => {
-    if (repType === "inward") return [];
+    const src = repType === "inward" ? [] : outward;
     return uniqueSorted(
-      outward.map((e) => e.project).filter(Boolean).slice(0, 200),
+      src
+        .filter((e) => matchReportFiltersExcept(e, "project"))
+        .map((e) => e.project),
       project,
     );
-  }, [repType, outward, project]);
+  }, [repType, outward, matchReportFiltersExcept, project]);
 
   // Weighted average unit price per material from inward receipts
   // (inward amount ÷ priced inward qty), same figure as Live Stock.
@@ -634,187 +670,103 @@ export default function Reports() {
     remarks: [],
   };
 
-  function filterEntries(entries, from, to) {
-    const matQ = String(material || "").trim().toLowerCase();
-    const projQ = String(project || "").trim().toLowerCase();
+  function filterEntries(entries) {
     return entries.filter((e) => {
-      if (from && e.date < from) return false;
-      if (to && e.date > to) return false;
+      if (dateFrom && e.date < dateFrom) return false;
+      if (dateTo && e.date > dateTo) return false;
       if (category && e.category !== category) return false;
       if (vendor && e.vendor !== vendor) return false;
-      if (matQ && !String(e.name || "").toLowerCase().includes(matQ))
-        return false;
-      if (projQ && !String(e.project || "").toLowerCase().includes(projQ))
-        return false;
+      if (material && e.name !== material) return false;
+      if (project && e.project !== project) return false;
       return true;
     });
   }
 
-  async function fetchTxnPages(fetcher, dateParams, label) {
-    const gen = loadGen.current;
-    let collected = [];
-    await loadInPages((params) => fetcher({ ...params, ...dateParams }), {
-      isCancelled: () => gen !== loadGen.current,
-      onUpdate: (rows, info) => {
-        if (gen !== loadGen.current) return;
-        collected = rows;
-        if (!info.complete) {
-          setListNote(`Loading ${label}… ${rows.length} of ${info.total}`);
-        }
-      },
-    });
-    return collected;
-  }
-
-  async function runReport() {
-    if (generating) return;
-    let from = dateFrom;
-    let to = dateTo;
-    if (!from && !to) {
-      from = todayStr();
-      to = todayStr();
-      window.alert(
-        "A date range is required for Reports. Using today’s date — pick From/To for a wider range (or Last 30 days).",
-      );
-      // Set dates before generating so the clear-rows effect runs first.
-      setDateFrom(from);
-      setDateTo(to);
-    }
-
-    const gen = ++loadGen.current;
-    setGenerating(true);
+  function runReport() {
     setCfBoth(emptyCfBoth);
     setCfTxn(emptyCfTxn);
-    setRows(null);
-    setRepMsg("");
-    setListNote("Generating report…");
-
-    const dateParams = {
-      ...(from ? { from } : {}),
-      ...(to ? { to } : {}),
-    };
-
-    try {
-      let result = [];
-
-      if (repType === "both") {
-        const hasEntryFilter = Boolean(
-          from || to || category || vendor || material || project,
+    if (repType === "both") {
+      const hasEntryFilter = Boolean(
+        dateFrom || dateTo || category || vendor || material || project,
+      );
+      let result;
+      if (!hasEntryFilter) {
+        result = stockRowsFromSummary(master, summary).sort((a, b) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
         );
-        if (!hasEntryFilter) {
-          result = stockRowsFromSummary(master, summary).sort((a, b) =>
-            String(a.name || "").localeCompare(String(b.name || "")),
-          );
-        } else {
-          setListNote("Loading inward + outward for combined report…");
-          const [inRows, outRows] = await Promise.all([
-            fetchTxnPages(getInward, dateParams, "inward"),
-            fetchTxnPages(getOutward, dateParams, "outward"),
-          ]);
-          if (gen !== loadGen.current) return;
-
-          const filteredIn = filterEntries(inRows, from, to);
-          const filteredOut = filterEntries(outRows, from, to);
-          const keyOf = (name) => String(name || "").trim().toLowerCase();
-          const inQtyMap = {};
-          const inValMap = {};
-          const inPricedQtyMap = {};
-          const outQtyMap = {};
-          const labelByKey = {};
-          const masterByKey = new Map(
-            master.map((m) => [keyOf(m.name), m]),
-          );
-          filteredIn.forEach((e) => {
-            const key = keyOf(e.name);
-            if (!key) return;
-            if (!labelByKey[key]) labelByKey[key] = e.name;
-            const qty = parseFloat(e.qty) || 0;
-            const price = parseFloat(e.price);
-            inQtyMap[key] = (inQtyMap[key] || 0) + qty;
-            if (Number.isFinite(price) && price > 0) {
-              inValMap[key] = (inValMap[key] || 0) + qty * price;
-              inPricedQtyMap[key] = (inPricedQtyMap[key] || 0) + qty;
-            }
-          });
-          filteredOut.forEach((e) => {
-            const key = keyOf(e.name);
-            if (!key) return;
-            if (!labelByKey[key]) labelByKey[key] = e.name;
-            outQtyMap[key] = (outQtyMap[key] || 0) + (parseFloat(e.qty) || 0);
-          });
-
-          result = Object.keys({ ...inQtyMap, ...outQtyMap })
-            .map((key) => {
-              const mat = masterByKey.get(key) || {};
-              const inQty = inQtyMap[key] || 0;
-              const outQty = outQtyMap[key] || 0;
-              const balance = inQty - outQty;
-              const minStock = parseFloat(mat.minStock) || 0;
-              const pricedQty = inPricedQtyMap[key] || 0;
-              const avgPrice =
-                pricedQty > 0 ? (inValMap[key] || 0) / pricedQty : 0;
-              const stockVal = avgPrice * Math.max(pricedQty - outQty, 0);
-              return {
-                name: mat.name || labelByKey[key] || key,
-                type: mat.type || "",
-                category: mat.category || "",
-                code: mat.code || "",
-                uom: mat.uom || "",
-                inQty,
-                outQty,
-                balance,
-                minStock,
-                avgPrice,
-                stockVal,
-              };
-            })
-            .sort((a, b) => a.name.localeCompare(b.name));
-        }
-      } else if (repType === "inward") {
-        const inRows = await fetchTxnPages(getInward, dateParams, "inward");
-        if (gen !== loadGen.current) return;
-        result = filterEntries(inRows, from, to).sort((a, b) =>
-          (b.date || "").localeCompare(a.date || ""),
-        );
-        // Keep a small sample for vendor suggestions only.
-        setInward(inRows.slice(0, 500));
       } else {
-        const outRows = await fetchTxnPages(getOutward, dateParams, "outward");
-        if (gen !== loadGen.current) return;
-        result = filterEntries(outRows, from, to).sort((a, b) =>
-          (b.date || "").localeCompare(a.date || ""),
-        );
-        setOutward(outRows.slice(0, 500));
+        const filteredIn = filterEntries(inward);
+        const filteredOut = filterEntries(outward);
+        const keyOf = (name) => String(name || "").trim().toLowerCase();
+        const inQtyMap = {};
+        const inValMap = {};
+        const inPricedQtyMap = {};
+        const outQtyMap = {};
+        const labelByKey = {};
+        filteredIn.forEach((e) => {
+          const key = keyOf(e.name);
+          if (!key) return;
+          if (!labelByKey[key]) labelByKey[key] = e.name;
+          const qty = parseFloat(e.qty) || 0;
+          const price = parseFloat(e.price);
+          inQtyMap[key] = (inQtyMap[key] || 0) + qty;
+          if (Number.isFinite(price) && price > 0) {
+            inValMap[key] = (inValMap[key] || 0) + qty * price;
+            inPricedQtyMap[key] = (inPricedQtyMap[key] || 0) + qty;
+          }
+        });
+        filteredOut.forEach((e) => {
+          const key = keyOf(e.name);
+          if (!key) return;
+          if (!labelByKey[key]) labelByKey[key] = e.name;
+          outQtyMap[key] = (outQtyMap[key] || 0) + (parseFloat(e.qty) || 0);
+        });
+
+        result = Object.keys({ ...inQtyMap, ...outQtyMap })
+          .map((key) => {
+            const mat =
+              master.find((m) => keyOf(m.name) === key) || {};
+            const inQty = inQtyMap[key] || 0;
+            const outQty = outQtyMap[key] || 0;
+            const balance = inQty - outQty;
+            const minStock = parseFloat(mat.minStock) || 0;
+            const pricedQty = inPricedQtyMap[key] || 0;
+            const avgPrice = pricedQty > 0 ? (inValMap[key] || 0) / pricedQty : 0;
+            const stockVal = avgPrice * Math.max(pricedQty - outQty, 0);
+            return {
+              name: mat.name || labelByKey[key] || key,
+              type: mat.type || "",
+              category: mat.category || "",
+              code: mat.code || "",
+              uom: mat.uom || "",
+              inQty,
+              outQty,
+              balance,
+              minStock,
+              avgPrice,
+              stockVal,
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
       }
 
-      if (gen !== loadGen.current) return;
-
-      const msg =
-        repType === "both"
-          ? result.length
-            ? `${result.length} material(s) found.`
-            : "No records match the selected filters."
-          : result.length
-            ? `${result.length} record(s) found.`
-            : "No records match the selected filters.";
-
-      // Let the "Generating…" paint finish before mounting the table.
-      await new Promise((r) => setTimeout(r, 0));
-      if (gen !== loadGen.current) return;
-
-      startTransition(() => {
-        setRows(result);
-        setRepMsg(msg);
-        setListNote("");
-      });
-    } catch (e) {
-      if (gen === loadGen.current) {
-        setRepMsg(e.message || "Could not generate report");
-        setListNote("");
-        setRows([]);
-      }
-    } finally {
-      if (gen === loadGen.current) setGenerating(false);
+      setRows(result);
+      setRepMsg(
+        result.length
+          ? `${result.length} material(s) found.`
+          : "No records match the selected filters.",
+      );
+    } else {
+      const src = repType === "inward" ? inward : outward;
+      const result = filterEntries(src).sort((a, b) =>
+        (b.date || "").localeCompare(a.date || ""),
+      );
+      setRows(result);
+      setRepMsg(
+        result.length
+          ? `${result.length} record(s) found.`
+          : "No records match the selected filters.",
+      );
     }
   }
 
@@ -908,90 +860,73 @@ export default function Reports() {
     }
   }
 
-  // Cheap unique lists for column filters (no cascading / formatINR over
-  // every row). Cascading was freezing Generate on large outward reports.
-  const cheapColOpts = useCallback((list, getters) => {
-    const out = {};
-    const src = list || [];
-    for (const [key, get] of Object.entries(getters)) {
-      // Cap per-column option source size; ColFilter dedupes when opened.
-      const capped = src.length > 1500 ? src.slice(0, 1500) : src;
-      out[key] = capped.map(get);
-    }
-    return out;
-  }, []);
-
   const colOptsBoth = useMemo(
     () =>
-      cheapColOpts(rows, {
+      buildCascadingColOpts(rows || [], cfBoth, {
         name: (r) => r.name,
         type: (r) => r.type,
         category: (r) => r.category,
         code: (r) => r.code,
         uom: (r) => r.uom,
-        inQty: (r) => String(r.inQty ?? ""),
-        outQty: (r) => String(r.outQty ?? ""),
-        balance: (r) => String(r.balance ?? ""),
-        minStock: (r) => String(r.minStock ?? ""),
-        avgPrice: (r) => String(r.avgPrice ?? ""),
-        stockVal: (r) => String(r.stockVal ?? ""),
+        inQty: (r) => String(formatNum(r.inQty)),
+        outQty: (r) => String(formatNum(r.outQty)),
+        balance: (r) => String(formatNum(r.balance)),
+        minStock: (r) => String(formatNum(r.minStock)),
+        avgPrice: (r) => String(formatINR(r.avgPrice)),
+        stockVal: (r) => String(formatINR(r.stockVal)),
       }),
-    [rows, cheapColOpts],
+    [rows, cfBoth],
   );
 
-  const colOptsTxn = useMemo(() => {
-    // Identity columns only — skip price/remarks lists (high cardinality / expensive).
-    const opts = cheapColOpts(rows, {
-      date: (r) => r.date,
-      name: (r) => r.name,
-      category: (r) => r.category,
-      code: (r) => r.code,
-      uom: (r) => r.uom,
-      qty: (r) => String(r.qty ?? ""),
-      reqty: (r) => (hasReqty(r) ? String(r.reqty) : "—"),
-      remaining: (r) => (hasReqty(r) ? String(remainingQty(r)) : "—"),
-      vendor: (r) => r.vendor || "—",
-      project: (r) => r.project || "—",
-    });
-    return {
-      ...opts,
-      price: [],
-      value: [],
-      avgPrice: [],
-      evaluation: [],
-      remarks: [],
-    };
-  }, [rows, cheapColOpts]);
+  const colOptsTxn = useMemo(
+    () =>
+      buildCascadingColOpts(rows || [], cfTxn, {
+        date: (r) => r.date,
+        name: (r) => r.name,
+        category: (r) => r.category,
+        code: (r) => r.code,
+        uom: (r) => r.uom,
+        qty: (r) => String(formatNum(r.qty)),
+        reqty: (r) => (hasReqty(r) ? String(formatNum(r.reqty)) : "—"),
+        remaining: (r) =>
+          hasReqty(r) ? String(formatNum(remainingQty(r))) : "—",
+        vendor: (r) => r.vendor || "—",
+        price: (r) => String(formatINR(r.price)),
+        value: (r) =>
+          String(
+            formatINR((parseFloat(r.qty) || 0) * (parseFloat(r.price) || 0)),
+          ),
+        avgPrice: (r) => String(formatINR(avgPriceFor(r.name))),
+        evaluation: (r) => String(formatINR(evaluationFor(r))),
+        project: (r) => r.project || "—",
+        remarks: (r) => r.remarks || "—",
+      }),
+    [rows, cfTxn, inwardAvgByName],
+  );
 
   // ── Apply column filters ───────────────────────────────────────────────────
-  const filteredRows = useMemo(() => {
-    if (!rows) return [];
-    const cf = repType === "both" ? cfBoth : cfTxn;
-    const anyColFilter = Object.values(cf).some((v) => v?.length);
-    if (!anyColFilter) return rows;
-
-    return rows.filter((r) => {
-      if (repType === "both") {
-        return (
-          (!cfBoth.name.length || cfBoth.name.includes(r.name)) &&
-          (!cfBoth.type.length || cfBoth.type.includes(r.type)) &&
-          (!cfBoth.category.length || cfBoth.category.includes(r.category)) &&
-          (!cfBoth.code.length || cfBoth.code.includes(r.code)) &&
-          (!cfBoth.uom.length || cfBoth.uom.includes(r.uom)) &&
-          (!cfBoth.inQty.length ||
-            cfBoth.inQty.includes(String(r.inQty ?? ""))) &&
-          (!cfBoth.outQty.length ||
-            cfBoth.outQty.includes(String(r.outQty ?? ""))) &&
-          (!cfBoth.balance.length ||
-            cfBoth.balance.includes(String(r.balance ?? ""))) &&
-          (!cfBoth.minStock.length ||
-            cfBoth.minStock.includes(String(r.minStock ?? ""))) &&
-          (!cfBoth.avgPrice.length ||
-            cfBoth.avgPrice.includes(String(r.avgPrice ?? ""))) &&
-          (!cfBoth.stockVal.length ||
-            cfBoth.stockVal.includes(String(r.stockVal ?? "")))
-        );
-      }
+  const filteredRows = useMemo(() => (rows || []).filter((r) => {
+    if (repType === "both") {
+      return (
+        (!cfBoth.name.length || cfBoth.name.includes(r.name)) &&
+        (!cfBoth.type.length || cfBoth.type.includes(r.type)) &&
+        (!cfBoth.category.length || cfBoth.category.includes(r.category)) &&
+        (!cfBoth.code.length || cfBoth.code.includes(r.code)) &&
+        (!cfBoth.uom.length || cfBoth.uom.includes(r.uom)) &&
+        (!cfBoth.inQty.length ||
+          cfBoth.inQty.includes(String(formatNum(r.inQty)))) &&
+        (!cfBoth.outQty.length ||
+          cfBoth.outQty.includes(String(formatNum(r.outQty)))) &&
+        (!cfBoth.balance.length ||
+          cfBoth.balance.includes(String(formatNum(r.balance)))) &&
+        (!cfBoth.minStock.length ||
+          cfBoth.minStock.includes(String(formatNum(r.minStock)))) &&
+        (!cfBoth.avgPrice.length ||
+          cfBoth.avgPrice.includes(String(formatINR(r.avgPrice)))) &&
+        (!cfBoth.stockVal.length ||
+          cfBoth.stockVal.includes(String(formatINR(r.stockVal))))
+      );
+    } else {
       const value = (parseFloat(r.qty) || 0) * (parseFloat(r.price) || 0);
       return (
         (!cfTxn.date.length || cfTxn.date.includes(r.date)) &&
@@ -999,25 +934,29 @@ export default function Reports() {
         (!cfTxn.category.length || cfTxn.category.includes(r.category)) &&
         (!cfTxn.code.length || cfTxn.code.includes(r.code)) &&
         (!cfTxn.uom.length || cfTxn.uom.includes(r.uom)) &&
-        (!cfTxn.qty.length || cfTxn.qty.includes(String(r.qty ?? ""))) &&
+        (!cfTxn.qty.length || cfTxn.qty.includes(String(formatNum(r.qty)))) &&
         (!cfTxn.reqty.length ||
-          cfTxn.reqty.includes(hasReqty(r) ? String(r.reqty) : "—")) &&
+          cfTxn.reqty.includes(
+            hasReqty(r) ? String(formatNum(r.reqty)) : "—",
+          )) &&
         (!cfTxn.remaining.length ||
           cfTxn.remaining.includes(
-            hasReqty(r) ? String(remainingQty(r)) : "—",
+            hasReqty(r) ? String(formatNum(remainingQty(r))) : "—",
           )) &&
         (!cfTxn.vendor.length || cfTxn.vendor.includes(r.vendor || "—")) &&
-        (!cfTxn.price.length || cfTxn.price.includes(String(r.price ?? ""))) &&
-        (!cfTxn.value.length || cfTxn.value.includes(String(value))) &&
+        (!cfTxn.price.length ||
+          cfTxn.price.includes(String(formatINR(r.price)))) &&
+        (!cfTxn.value.length ||
+          cfTxn.value.includes(String(formatINR(value)))) &&
         (!cfTxn.avgPrice.length ||
-          cfTxn.avgPrice.includes(String(avgPriceFor(r.name) || 0))) &&
+          cfTxn.avgPrice.includes(String(formatINR(avgPriceFor(r.name))))) &&
         (!cfTxn.evaluation.length ||
-          cfTxn.evaluation.includes(String(evaluationFor(r) || 0))) &&
+          cfTxn.evaluation.includes(String(formatINR(evaluationFor(r))))) &&
         (!cfTxn.project.length || cfTxn.project.includes(r.project || "—")) &&
         (!cfTxn.remarks.length || cfTxn.remarks.includes(r.remarks || "—"))
       );
-    });
-  }, [rows, repType, cfBoth, cfTxn, inwardAvgByName]);
+    }
+  }), [rows, repType, cfBoth, cfTxn, inwardAvgByName]);
 
   const sortedRows = useMemo(
     () =>
@@ -1178,19 +1117,6 @@ export default function Reports() {
                 style={{ cursor: "pointer" }}
               />
             </div>
-            <div className="field" style={{ alignSelf: "end" }}>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  setDateFrom(daysAgoStr(30));
-                  setDateTo(todayStr());
-                }}
-                title="Set date range to the last 30 days"
-              >
-                Last 30 days
-              </button>
-            </div>
             {repType !== "outward" && (
               <div className="field">
                 <label>Vendor</label>
@@ -1209,44 +1135,38 @@ export default function Reports() {
             )}
             <div className="field">
               <label>Material</label>
-              <input
-                type="text"
+              <select
                 value={material}
                 onChange={(e) => setMaterial(e.target.value)}
-                placeholder="All materials (type to filter)"
-                list="report-material-suggestions"
-              />
-              <datalist id="report-material-suggestions">
+              >
+                <option value="">All materials</option>
                 {materials.map((m) => (
-                  <option key={m} value={m} />
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </div>
             {repType !== "inward" && (
               <div className="field">
                 <label>Project</label>
-                <input
-                  type="text"
+                <select
                   value={project}
                   onChange={(e) => setProject(e.target.value)}
-                  placeholder="All projects (type to filter)"
-                  list="report-project-suggestions"
-                />
-                <datalist id="report-project-suggestions">
+                >
+                  <option value="">All projects</option>
                   {projects.map((p) => (
-                    <option key={p} value={p} />
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
             )}
           </div>
           <div className="actionrow" style={{ marginTop: 20 }}>
-            <button
-              className="btn btn-in"
-              onClick={runReport}
-              disabled={generating}
-            >
-              {generating ? "Generating…" : "Generate report"}
+            <button className="btn btn-in" onClick={runReport}>
+              Generate report
             </button>
             {filteredRows?.length > 0 && (
               <button className="btn btn-out" onClick={exportReport}>
