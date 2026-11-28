@@ -15,23 +15,40 @@ const isProd = process.env.NODE_ENV === 'production';
 app.set('trust proxy', 1);
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-// Read allowed origin from .env — supports comma-separated list for multiple origins
+// Read allowed origin from .env — supports comma-separated list for multiple origins.
+// Example (Hostinger): CORS_ORIGIN=https://indigo-goshawk-630192.hostingersite.com
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',')
-  .map(o => o.trim())
+  .map((o) =>
+    o
+      .trim()
+      .replace(/^['"]|['"]$/g, '') // strip accidental quotes from .env
+      .replace(/\/+$/, ''), // Origin never has a trailing slash
+  )
   .filter(Boolean);
+
+if (isProd) {
+  console.log('[cors] allowed origins:', allowedOrigins.join(', ') || '(none)');
+}
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (curl, Postman, server-to-server)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    const err = new Error(`CORS: origin ${origin} not allowed`);
-    err.status = 403;
-    callback(err);
+    const normalized = String(origin).replace(/\/+$/, '');
+    if (allowedOrigins.includes(normalized)) return callback(null, true);
+    // Deny without throwing — a thrown error often omits CORS headers and
+    // the browser only reports "No Access-Control-Allow-Origin".
+    console.warn(`[cors] blocked origin: ${origin}`);
+    return callback(null, false);
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Explicit preflight for all routes (some hosts mishandle OPTIONS otherwise)
+app.options('*', cors());
 
 // ── Body parser ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
